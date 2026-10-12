@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|Xbox 360"><Configuration>Release</Configuration><Platform>Xbox 360</Platform></ProjectConfiguration></ItemGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{33C84A5A-1065-42B4-934D-3360BE360001}</ProjectGuid><Keyword>Xbox360Proj</Keyword><ProjectName>NetBench360</ProjectName></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><CharacterSet>MultiByte</CharacterSet><PlatformToolset>2010-01</PlatformToolset></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)..\build\xbox\</OutDir><IntDir>$(OutDir)obj\</IntDir>
+    <TargetName>NetBench360</TargetName><TargetExt>.exe</TargetExt>
+    <TargetPath>$(OutDir)NetBench360.exe</TargetPath><OutputFile>$(OutDir)NetBench360.exe</OutputFile>
+    <ImageXexOutput>$(OutDir)NetBench360.xex</ImageXexOutput>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><Optimization>Full</Optimization><FavorSizeOrSpeed>Speed</FavorSizeOrSpeed><WarningLevel>Level4</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader><RuntimeLibrary>MultiThreaded</RuntimeLibrary><ExceptionHandling>false</ExceptionHandling>
+      <PreprocessorDefinitions>NDEBUG;_XBOX;DEVKIT_ONLY=0;%(PreprocessorDefinitions)</PreprocessorDefinitions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(IntDir)compiler.pdb</ProgramDataBaseFileName><FunctionLevelLinking>true</FunctionLevelLinking><StringPooling>true</StringPooling>
+    </ClCompile>
+    <Link><OutputFile>$(OutDir)NetBench360.exe</OutputFile><GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)NetBench360.pdb</ProgramDatabaseFile><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <AdditionalDependencies>xapilib.lib;xboxkrnl.lib;xnet.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xmcore.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <ImageXex><ConfigurationFile>$(ProjectDir)NetBench360.xml</ConfigurationFile></ImageXex>
+    <Deploy><ExcludedFromBuild>true</ExcludedFromBuild></Deploy>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\shared\bench.cpp" /><ClCompile Include="..\shared\ui.cpp" /></ItemGroup>
+  <ItemGroup><ClInclude Include="..\shared\bench.h" /><ClInclude Include="..\shared\ui.h" /><None Include="NetBench360.xml" /></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

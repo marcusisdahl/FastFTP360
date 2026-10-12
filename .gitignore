@@ -1,0 +1,9 @@
+build/
+.vs/
+*.user
+*.suo
+*.tlog
+*.pdb
+*.obj
+*.log
+__pycache__/
