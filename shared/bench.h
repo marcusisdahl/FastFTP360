@@ -33,6 +33,7 @@ void Write64(unsigned char* p, U64 value);
 void Pattern(unsigned char* p, DWORD seed);
 double Now();
 bool PrepareSocket(SOCKET s, char* error, size_t capacity);
+bool PrepareListener(SOCKET s, char* error, size_t capacity);
 bool Serve(SOCKET s, const Observer& observer, Result& result, char* error, size_t capacity);
 const char* PhaseName(Phase phase);
 }

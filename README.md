@@ -1,6 +1,8 @@
 # NetBench360
 
-A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.1 is an experimental first build; console execution and graphics still need hardware validation.
+A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.1.1 fixes the first console test's accepted-connection LAN-option failure. The Xbox UI and listener have been exercised on hardware; timed console transfers still need validation.
+
+**Updating from v0.1:** stop and exit the Xbox app, replace its application XEX with the v0.1.1 XEX, and relaunch it. Use the updated Windows companion for clearer error messages. Changing only the PC executable will not fix the v0.1 Xbox failure. Neither application needs to be run automatically at boot; the Windows app needs no administrator privileges.
 
 It measures one TCP stream in either direction without reading or writing benchmark data to the Xbox drive. It is useful for comparing CUsbEnet builds and separating network limits from FTP, dashboard, or disk overhead. It measures the application, TCP stack, driver and link together, not raw USB bandwidth. It is a custom protocol, not an iperf server.
 

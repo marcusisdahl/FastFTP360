@@ -49,7 +49,7 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     const unsigned int bg=0xFF0F1725,card=0xFF192537,white=0xFFE2EBF4,muted=0xFF8FA6BA,green=0xFF3ED9BC,blue=0xFF73B8FF;
     Painter p(rectangle,context); char text[128];
     p.Box(0,0,1280,720,bg); p.Box(56,48,7,44,green);
-    p.Text("NETBENCH360",80,52,5,white); p.Text("RAM NETWORK BENCHMARK / V0.1",80,105,2,muted);
+    p.Text("NETBENCH360",80,52,5,white); p.Text("RAM NETWORK BENCHMARK / V0.1.1",80,105,2,muted);
     p.Text("XBOX IP",832,53,2,muted); p.Text(s.ip,832,78,2,white,30);
     p.Text("PORT 36020",832,107,2,muted);
     p.Box(56,163,564,132,card); p.Box(660,163,564,132,card);

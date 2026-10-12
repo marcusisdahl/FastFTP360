@@ -33,7 +33,7 @@ static void Failure(const char* message) {
 static DWORD WINAPI ServerThread(void*) {
     char error[100]={0};
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-    bool ready=listener!=INVALID_SOCKET && nb::PrepareSocket(listener,error,sizeof(error));
+    bool ready=listener!=INVALID_SOCKET && nb::PrepareListener(listener,error,sizeof(error));
     sockaddr_in address={0}; address.sin_family=AF_INET; address.sin_addr.s_addr=INADDR_ANY; address.sin_port=htons(nb::Port);
     if(ready) ready=bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address))==0 && listen(listener,1)==0;
     if(!ready) Failure(error[0]?error:"COULD NOT LISTEN ON PORT 36020");

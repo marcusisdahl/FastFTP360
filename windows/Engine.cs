@@ -26,6 +26,7 @@ namespace NetBench360 {
         readonly Action<Update> update;
         readonly Stopwatch session=Stopwatch.StartNew();
         double lastActivity;
+        string phase="Connecting";
         public Engine(CancellationToken token, Action<Update> progress) {
             cancel=token; update=progress;
             socket=new Socket(AddressFamily.InterNetwork,SocketType.Stream,ProtocolType.Tcp);
@@ -45,6 +46,7 @@ namespace NetBench360 {
             return data;
         }
         void Notify(string phase,int direction,ulong bytes,double seconds,double rate) {
+            this.phase=phase;
             if(update!=null) update(new Update { Phase=phase,Direction=direction,Bytes=bytes,Seconds=seconds,Rate=rate });
         }
         void Wait(SelectMode mode) {
@@ -78,7 +80,11 @@ namespace NetBench360 {
         void ReceiveAll(byte[] buffer) {
             int at=0;
             while(at<buffer.Length) { int count=Receive(buffer,at,buffer.Length-at);
-                if(count==0) throw new InvalidOperationException("The peer ended the transfer early."); at+=count; }
+                if(count==0) {
+                    string hint=phase=="Negotiating" ? " Check the error line on the Xbox screen and use the updated Xbox XEX." : "";
+                    throw new InvalidOperationException("Xbox closed the connection during "+phase.ToLowerInvariant()+" ("+at+"/"+buffer.Length+" bytes)."+hint);
+                }
+                at+=count; }
         }
         void FixedTransfer(bool sender,byte[] expected,byte[] buffer,int bytes,bool verify) {
             for(int at=0;at<bytes;at+=Chunk) {
@@ -114,6 +120,7 @@ namespace NetBench360 {
             byte[] request=new byte[32];
             uint[] fields={Magic,Version,(uint)direction,(uint)seconds,Chunk,(uint)bufferSize,(uint)warmupMiB,seed};
             for(int i=0;i<fields.Length;i++) Write32(request,4*i,fields[i]);
+            Notify("Negotiating",direction,0,0,0);
             SendAll(request,32); byte[] response=new byte[32]; ReceiveAll(response);
             if(Read32(response,0)!=Magic || Read32(response,4)!=Version || Read32(response,8)!=0 ||
                 Read32(response,12)!=Chunk || Read32(response,24)!=Integrity || Read32(response,28)!=warmupMiB)

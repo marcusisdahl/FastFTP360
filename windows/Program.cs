@@ -19,7 +19,7 @@ namespace NetBench360 {
         readonly List<TestResult> results=new List<TestResult>();
         CancellationTokenSource cancellation; bool running,closeRequested; int testSeconds;
         public MainForm() {
-            Text="NetBench360 - RAM network benchmark"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
+            Text="NetBench360 v0.1.1 - RAM network benchmark"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
             StartPosition=FormStartPosition.CenterScreen; BackColor=navy; ForeColor=ink; Font=new Font("Segoe UI",10);
             AutoScaleMode=AutoScaleMode.Dpi;
             LabelAt("NETBENCH360",26,20,520,40,24,FontStyle.Bold);

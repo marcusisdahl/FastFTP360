@@ -46,9 +46,10 @@ def free_port():
 
 
 @contextlib.contextmanager
-def server(count=1):
+def server(count=1, lan_shim=False):
     port = free_port()
-    process = subprocess.Popen([str(ROOT / "build/host/host-server.exe"), str(port), str(count)],
+    executable = "lan-host-server.exe" if lan_shim else "host-server.exe"
+    process = subprocess.Popen([str(ROOT / "build/host" / executable), str(port), str(count)],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                creationflags=subprocess.CREATE_NO_WINDOW)
     try:
@@ -88,6 +89,13 @@ for mode in (1, 2):
         output = host.communicate(timeout=5)[0]
         print("Client:", result.stdout.strip(), "Server:", output.strip(), flush=True)
         check("C# / C++ direction %d receiver totals agree" % mode,
+              result.returncode == 0 and result.stdout.strip() == output.strip() and "PASS" in output)
+
+for mode in (1, 2):
+    with server(lan_shim=True) as (port, host):
+        result = client(port, mode)
+        output = host.communicate(timeout=5)[0]
+        check("direction %d works when LAN options on accepted sockets are rejected" % mode,
               result.returncode == 0 and result.stdout.strip() == output.strip() and "PASS" in output)
 
 with server(2) as (port, host):
@@ -187,7 +195,7 @@ def bad_result(s, fields):
     s.sendall(b"\0" * 64)
 
 
-stub_test("client rejects truncated response", lambda s, f: s.sendall(b"NB"), 1, "ended the transfer early")
+stub_test("client identifies a truncated handshake", lambda s, f: s.sendall(b"NB"), 1, "during negotiating (2/32 bytes)")
 stub_test("client rejects wrong protocol", lambda s, f: s.sendall(b"\0" * 32), 1, "different protocol")
 stub_test("client rejects corrupt integrity data", corrupt, 2, "integrity check FAILED")
 stub_test("client rejects forged receiver result", bad_result, 1, "Receiver totals")

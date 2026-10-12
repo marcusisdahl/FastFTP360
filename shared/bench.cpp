@@ -31,16 +31,27 @@ static void Error(char* text, size_t capacity, const char* message) {
 }
 bool PrepareSocket(SOCKET s, char* error, size_t capacity) {
     u_long nonblocking=1;
-#ifdef _XBOX
-    // Per-socket LAN access used by Xbox homebrew. No kernel patching.
+    if (ioctlsocket(s,FIONBIO,&nonblocking)) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"NONBLOCKING SOCKET FAILED (%d)",code); return false;
+    }
+    return true;
+}
+bool PrepareListener(SOCKET s, char* error, size_t capacity) {
+#if defined(_XBOX) || defined(NB_TEST_LAN_OPTIONS)
+    // Configure LAN access before bind/listen. Accepted connections inherit the
+    // listener's policy; retail XNet can reject changing these options afterward.
     BOOL enabled=TRUE;
-    if (setsockopt(s,SOL_SOCKET,0x5801,reinterpret_cast<const char*>(&enabled),sizeof(enabled)) ||
-        setsockopt(s,SOL_SOCKET,0x5802,reinterpret_cast<const char*>(&enabled),sizeof(enabled))) {
-        Error(error,capacity,"LAN socket options failed"); return false;
+    if (setsockopt(s,SOL_SOCKET,0x5801,reinterpret_cast<const char*>(&enabled),sizeof(enabled))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"LISTENER LAN 5801 FAILED (%d)",code); return false;
+    }
+    if (setsockopt(s,SOL_SOCKET,0x5802,reinterpret_cast<const char*>(&enabled),sizeof(enabled))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"LISTENER LAN 5802 FAILED (%d)",code); return false;
     }
 #endif
-    if (ioctlsocket(s,FIONBIO,&nonblocking)) { Error(error,capacity,"Socket mode failed"); return false; }
-    return true;
+    return PrepareSocket(s,error,capacity);
 }
 
 // One worker owns the socket. Cancellation is polled without closing a socket
@@ -57,6 +68,10 @@ public:
     Connection(SOCKET s,const Observer& o,char* e,size_t c) : socket_(s), observer_(o), error_(e), capacity_(c),
         lastActivity_(Now()), deadline_(Now()+180) {}
     bool Stop(const char* message) { Error(error_,capacity_,message); return false; }
+    bool StopSocket(const char* operation) {
+        int code=WSAGetLastError();
+        _snprintf_s(error_,capacity_,_TRUNCATE,"%s (%d)",operation,code); return false;
+    }
     bool Wait(bool writing) {
         for (;;) {
             if (observer_.cancelled && observer_.cancelled(observer_.context)) return Stop("Cancelled");
@@ -67,7 +82,7 @@ public:
             timeval timeout={0,100000};
             int rc=select(0,writing?NULL:&set,writing?&set:NULL,NULL,&timeout);
             if (rc>0) return true;
-            if (rc==SOCKET_ERROR) return Stop("Socket wait failed");
+            if (rc==SOCKET_ERROR) return StopSocket("SOCKET WAIT FAILED");
         }
     }
     int Receive(unsigned char* data,int count) {
@@ -127,12 +142,14 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
     Write32(response,Magic); Write32(response+4,Version); Write32(response+8,valid ? 0 : 1);
     if(!valid) { c.SendAll(response,RequestSize); return c.Stop("Unsupported test request"); }
     int buffer=int(socketBuffer), actualSend=0,actualRecv=0,length=sizeof(int);
-    if(setsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer)) ||
-       setsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer)) ||
-       getsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<char*>(&actualSend),&length))
-        return c.Stop("Socket buffer setup failed");
+    if(setsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer)))
+        return c.StopSocket("SEND BUFFER SETUP FAILED");
+    if(setsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer)))
+        return c.StopSocket("RECEIVE BUFFER SETUP FAILED");
+    if(getsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<char*>(&actualSend),&length))
+        return c.StopSocket("SEND BUFFER QUERY FAILED");
     length=sizeof(int);
-    if(getsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<char*>(&actualRecv),&length)) return c.Stop("Socket buffer query failed");
+    if(getsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<char*>(&actualRecv),&length)) return c.StopSocket("RECEIVE BUFFER QUERY FAILED");
     r.direction=direction; r.seconds=seconds; r.sendBuffer=actualSend; r.recvBuffer=actualRecv;
     c.Configure(seconds);
     Write32(response+12,Chunk); Write32(response+16,actualSend); Write32(response+20,actualRecv);
