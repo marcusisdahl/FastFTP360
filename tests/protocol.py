@@ -46,8 +46,8 @@ def free_port():
 
 
 @contextlib.contextmanager
-def server(count=1, lan_shim=False):
-    port = free_port()
+def server(count=1, lan_shim=False, fixed_port=None):
+    port = fixed_port if fixed_port is not None else free_port()
     executable = "lan-host-server.exe" if lan_shim else "host-server.exe"
     process = subprocess.Popen([str(ROOT / "build/host" / executable), str(port), str(count)],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -66,10 +66,12 @@ def server(count=1, lan_shim=False):
         process.wait(timeout=3)
 
 
-def client(port, direction=1, seconds=1, cancel=None):
+def client(port, direction=1, seconds=1, cancel=None, buffer=None):
     args = [str(ROOT / "build/host/client-cli.exe"), str(port), str(direction), str(seconds)]
-    if cancel is not None:
-        args.append(str(cancel))
+    if cancel is not None or buffer is not None:
+        args.append(str(cancel if cancel is not None else -1))
+    if buffer is not None:
+        args.append(str(buffer))
     return subprocess.run(args, text=True, capture_output=True, timeout=25, creationflags=subprocess.CREATE_NO_WINDOW)
 
 
@@ -95,8 +97,23 @@ for mode in (1, 2):
     with server(lan_shim=True) as (port, host):
         result = client(port, mode)
         output = host.communicate(timeout=5)[0]
-        check("direction %d works when LAN options on accepted sockets are rejected" % mode,
+        check("direction %d works when LAN and buffer changes on accepted sockets are rejected" % mode,
               result.returncode == 0 and result.stdout.strip() == output.strip() and "PASS" in output)
+
+for buffer in (16384, 32768, 65536, 131072):
+    for mode in (1, 2):
+        with server(lan_shim=True) as (port, host):
+            result = client(port, mode, buffer=buffer)
+            output = host.communicate(timeout=5)[0]
+            check("PC buffer %d / direction %d with fixed server buffers and accurate metadata" % (buffer, mode),
+                  result.returncode == 0 and "PASS" in output)
+
+restart_port = free_port()
+for run in (1, 2):
+    with server(lan_shim=True, fixed_port=restart_port) as (port, host):
+        result = client(port, 2)
+        output = host.communicate(timeout=5)[0]
+        check("same-port listener start %d succeeds immediately" % run, result.returncode == 0 and "PASS" in output)
 
 with server(2) as (port, host):
     cancelled = client(port, 1, 10, 300)

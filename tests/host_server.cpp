@@ -9,6 +9,10 @@ int main(int argc,char** argv) {
     WSADATA wsa; if(WSAStartup(MAKEWORD(2,2),&wsa)) return 1;
     int port=argc>1?atoi(argv[1]):36020, count=argc>2?atoi(argv[2]):1;
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+    // Model the Xbox app's 64 KiB startup defaults before bind/accept.
+    int buffer=nb::Chunk;
+    if(setsockopt(listener,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer)) ||
+       setsockopt(listener,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer))) return 2;
     char setupError[120]={0};
     if(!nb::PrepareListener(listener,setupError,sizeof(setupError))) { printf("ERROR %s\n",setupError); return 2; }
     sockaddr_in address={0}; address.sin_family=AF_INET; address.sin_addr.s_addr=htonl(INADDR_LOOPBACK); address.sin_port=htons((u_short)port);

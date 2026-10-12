@@ -51,6 +51,11 @@ bool PrepareListener(SOCKET s, char* error, size_t capacity) {
         _snprintf_s(error,capacity,_TRUNCATE,"LISTENER LAN 5802 FAILED (%d)",code); return false;
     }
 #endif
+    BOOL reuse=TRUE;
+    if(setsockopt(s,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&reuse),sizeof(reuse))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"LISTENER PORT REUSE FAILED (%d)",code); return false;
+    }
     return PrepareSocket(s,error,capacity);
 }
 
@@ -141,11 +146,10 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
         socketBuffer==65536 || socketBuffer==131072) && warmupMiB>=1 && warmupMiB<=64;
     Write32(response,Magic); Write32(response+4,Version); Write32(response+8,valid ? 0 : 1);
     if(!valid) { c.SendAll(response,RequestSize); return c.Stop("Unsupported test request"); }
-    int buffer=int(socketBuffer), actualSend=0,actualRecv=0,length=sizeof(int);
-    if(setsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer)))
-        return c.StopSocket("SEND BUFFER SETUP FAILED");
-    if(setsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<const char*>(&buffer),sizeof(buffer)))
-        return c.StopSocket("RECEIVE BUFFER SETUP FAILED");
+    // XNet on the tested retail console rejects SO_RCVBUF on an accepted TCP
+    // connection (10022). Keep startup/listener defaults and report real values.
+    // The request's buffer setting is a PC setting, not a guarantee for Xbox.
+    int actualSend=0,actualRecv=0,length=sizeof(int);
     if(getsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<char*>(&actualSend),&length))
         return c.StopSocket("SEND BUFFER QUERY FAILED");
     length=sizeof(int);

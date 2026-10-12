@@ -106,6 +106,8 @@ namespace NetBench360 {
             Notify("Connecting",direction,0,0,0);
             IPAddress ip=IPAddress.Parse(address);
             if(ip.AddressFamily!=AddressFamily.InterNetwork) throw new ArgumentException("Use an IPv4 address.");
+            // Apply buffer preferences before connection establishment.
+            socket.SendBufferSize=bufferSize; socket.ReceiveBufferSize=bufferSize;
             IAsyncResult connecting=socket.BeginConnect(new IPEndPoint(ip,port),null,null);
             using(WaitHandle wait=connecting.AsyncWaitHandle) {
                 while(!wait.WaitOne(100)) {
@@ -114,7 +116,7 @@ namespace NetBench360 {
                 }
                 socket.EndConnect(connecting);
             }
-            socket.Blocking=false; socket.SendBufferSize=bufferSize; socket.ReceiveBufferSize=bufferSize;
+            socket.Blocking=false;
             lastActivity=session.Elapsed.TotalSeconds;
             uint seed=unchecked((uint)Environment.TickCount) ^ 0x360179u;
             byte[] request=new byte[32];

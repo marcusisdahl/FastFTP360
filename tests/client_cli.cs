@@ -9,7 +9,10 @@ class ClientTest {
             using(var cancel=new CancellationTokenSource()) {
                 if(args.Length>3) cancel.CancelAfter(int.Parse(args[3]));
                 using(var engine=new Engine(cancel.Token,null)) {
-                    var r=engine.Run("127.0.0.1",int.Parse(args[0]),int.Parse(args[1]),int.Parse(args[2]),65536,1);
+                    int buffer=args.Length>4 ? int.Parse(args[4]) : 65536;
+                    var r=engine.Run("127.0.0.1",int.Parse(args[0]),int.Parse(args[1]),int.Parse(args[2]),buffer,1);
+                    if(args.Length>4 && (r.RequestedBuffer!=buffer || r.PcSendBuffer!=buffer || r.PcRecvBuffer!=buffer ||
+                        r.XboxSendBuffer!=65536 || r.XboxRecvBuffer!=65536)) throw new Exception("Buffer metadata did not match actual settings.");
                     Console.WriteLine("PASS direction={0} bytes={1} seconds={2:F6} MiB/s={3:F2}",r.Direction,r.Bytes,r.Microseconds/1000000.0,r.Rate);
                 }
             }

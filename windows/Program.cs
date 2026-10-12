@@ -19,7 +19,7 @@ namespace NetBench360 {
         readonly List<TestResult> results=new List<TestResult>();
         CancellationTokenSource cancellation; bool running,closeRequested; int testSeconds;
         public MainForm() {
-            Text="NetBench360 v0.1.1 - RAM network benchmark"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
+            Text="NetBench360 v0.1.2 - RAM network benchmark"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
             StartPosition=FormStartPosition.CenterScreen; BackColor=navy; ForeColor=ink; Font=new Font("Segoe UI",10);
             AutoScaleMode=AutoScaleMode.Dpi;
             LabelAt("NETBENCH360",26,20,520,40,24,FontStyle.Bold);
@@ -29,8 +29,8 @@ namespace NetBench360 {
             LabelAt("DIRECTION",464,119,248,22,9); direction=Choice(new[]{"Both directions","PC to Xbox","Xbox to PC"},464,144,248,0);
             LabelAt("DURATION",730,119,128,22,9); duration=Choice(new[]{"10 seconds","20 seconds","30 seconds","60 seconds"},730,144,128,1);
             LabelAt("REPEATS",876,119,146,22,9); repeats=Choice(new[]{"1 per direction","2 per direction","3 per direction","5 per direction"},876,144,146,2);
-            LabelAt("SOCKET BUFFERS",28,195,190,22,9); buffers=Choice(new[]{"16 KiB","32 KiB","64 KiB","128 KiB"},28,219,190,2);
-            LabelAt("Keep settings identical when comparing drivers. The label does not change the Xbox plugin.",236,221,770,28,10);
+            LabelAt("PC SOCKET BUFFERS",28,195,190,22,9); buffers=Choice(new[]{"16 KiB","32 KiB","64 KiB","128 KiB"},28,219,190,2);
+            LabelAt("Xbox requests 64 KiB at startup. Actual buffers are recorded in CSV. Keep settings identical.",236,221,770,28,10);
             start=ButtonAt("Start benchmark",28,272,190,accent,navy); start.Click+=Start;
             stop=ButtonAt("Stop",236,272,100,panel,ink); stop.Enabled=false; stop.Click+=(s,e)=>{ if(cancellation!=null) cancellation.Cancel(); status.Text="Stopping..."; };
             save=ButtonAt("Save CSV",878,272,144,panel,ink); save.Enabled=false; save.Click+=Save;

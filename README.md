@@ -1,8 +1,8 @@
 # NetBench360
 
-A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.1.1 fixes the first console test's accepted-connection LAN-option failure. The Xbox UI and listener have been exercised on hardware; timed console transfers still need validation.
+A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.1.2 addresses the console-reported LAN-option and receive-buffer setup failures, adds listener port reuse, and reports precise listener errors. The Xbox UI and listener have been exercised on hardware; timed console transfers still need validation.
 
-**Updating from v0.1:** stop and exit the Xbox app, replace its application XEX with the v0.1.1 XEX, and relaunch it. Use the updated Windows companion for clearer error messages. Changing only the PC executable will not fix the v0.1 Xbox failure. Neither application needs to be run automatically at boot; the Windows app needs no administrator privileges.
+**Updating from v0.1 or v0.1.1:** stop and exit the Xbox app, replace its application XEX with the v0.1.2 XEX, and relaunch it. The previous PC clients remain protocol-compatible; the updated companion clarifies the buffer setting. Changing only the PC executable will not fix the Xbox setup errors. Neither application needs to be run automatically at boot; the Windows app needs no administrator privileges.
 
 It measures one TCP stream in either direction without reading or writing benchmark data to the Xbox drive. It is useful for comparing CUsbEnet builds and separating network limits from FTP, dashboard, or disk overhead. It measures the application, TCP stack, driver and link together, not raw USB bandwidth. It is a custom protocol, not an iperf server.
 
@@ -24,13 +24,13 @@ After the first test works, use **20 seconds, 3 repeats per direction, 64 KiB** 
 
 - If RAM throughput is substantially above FTP throughput, the FTP application and/or storage path likely contributes to the FTP limit. This test alone cannot distinguish those two causes.
 - If RAM throughput stays close to FTP, investigate the network path and benchmark/stack overhead before attributing the limit to the drive.
-- Buffer options change this application's sockets only. Keep them fixed for driver comparisons. A separate buffer-size sweep can be useful later.
+- The buffer selector changes **PC socket buffers**, before connecting. The Xbox requests **64 KiB send/receive defaults at XNet startup** and keeps the accepted socket's actual buffers. Both ends' actual values are recorded; the Xbox's actual size may differ from the request. Keep settings fixed for driver comparisons. A separate PC buffer-size sweep can be useful later.
 
 `MiB/s` uses 1,048,576 bytes per second; multiply by 8.388608 for decimal Mbit/s. Low/high values are receiver samples covering at least one second; the final partial interval is excluded. Overall average includes the whole measured payload transfer and drain.
 
 ## What a run does
 
-1. Negotiate direction, time and socket buffers over TCP port **36020**.
+1. Negotiate direction and time over TCP port **36020**, and report the actual buffers at both ends.
 2. Transfer and validate **1 MiB** of known data outside the timed measurement.
 3. Transfer a **32 MiB warm-up**, also outside the measurement.
 4. Reuse 64 KiB memory blocks for the requested duration. There is no growing RAM file. The C++ session uses two 64 KiB buffers, plus socket and UI memory.

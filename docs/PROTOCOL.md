@@ -4,6 +4,8 @@ All fields are unsigned **big endian**, including the 64-bit counters. A connect
 
 The 32-byte request contains eight uint32 fields: magic `0x4E423336`, version `1`, direction, duration seconds, chunk bytes `65536`, requested socket bytes, warm-up MiB, and pattern seed. Allowed duration 1-60, buffers 16384/32768/65536/131072, warm-up 1-64. Reject unsupported fields before allocating large or unbounded resources.
 
+As of application v0.1.2, requested socket bytes describe the PC setting. The Xbox does not resize an accepted socket: it requests 64 KiB defaults at XNet startup and reports actual send/receive sizes in the response. This preserves protocol v1 compatibility; clients must use actual sizes rather than assuming the Xbox honored the PC request.
+
 The 32-byte response contains eight uint32 fields: magic, version, status (0 accepted, 1 invalid request), chunk bytes, actual Xbox send buffer, actual Xbox receive buffer, integrity bytes `1048576`, warm-up MiB. On rejection, fields after status are zero and the connection closes.
 
 The pattern is xorshift32, initialized to the supplied seed (zero becomes one): `s ^= s << 13; s ^= s >> 17; s ^= s << 5`, with uint32 wrapping; each output byte is the low byte after the three operations. Generate 65536 bytes once and repeat that block. Integrity and warm-up use exact block counts. After each phase, the receiver sends a four-byte zero ACK; a failure closes the connection. Only the integrity phase validates bytes.

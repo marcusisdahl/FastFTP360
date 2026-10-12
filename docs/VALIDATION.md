@@ -1,13 +1,15 @@
-# v0.1.1 validation
+# v0.1.2 validation
 
 Built on Windows using VS 2022 Community with installed RXDK-360 integration, Xbox PowerPC compiler 16.00.11886.00, and .NET Framework C# compiler. Xbox build succeeds with `DEVKIT_ONLY=0`. Deployment is excluded in the project.
 
 Build reports three warnings: MSB8003 for the integration's missing WindowsSDKDir property, and two C4127 constant-condition warnings from SDK `FD_SET` macro expansions. There are no compile or link errors. These warnings do not substitute for a hardware run.
 
-`tests/protocol.py` passes 23 checks:
+`tests/protocol.py` passes 33 checks:
 
 - Cross-language transfers in both directions with equal sender/receiver payload totals and final receiver rates.
-- Both directions also pass with a socket shim that rejects LAN-option changes on accepted connections, reproducing the operation that failed on the user's console. This is a host regression test, not a replacement for retail XNet validation.
+- Both directions also pass with a socket shim that rejects LAN and buffer changes on accepted connections, reproducing the operations that failed on the user's console. This is a host regression test, not a replacement for retail XNet validation.
+- All four PC buffer settings work in both directions with fixed server buffers; actual buffer metadata is checked.
+- A listener can finish a transfer, stop, and immediately restart on the same port under the host socket implementation.
 - Cancellation discards an unfinished run; the next connection succeeds.
 - Nine invalid request cases rejected (magic, version, direction, durations, chunk, buffer, warm-up bounds).
 - Fragmented request accepted; corrupt integrity data rejected.
@@ -19,6 +21,8 @@ The Xbox screen layout is rendered locally using the same layout source, without
 
 The first hardware attempt with v0.1 launched the Xbox UI and accepted a PC connection, then displayed `LAN socket options failed`. A PC-side handshake probe received zero response bytes before the console closed the connection. The original code reapplied the listener's LAN options on the accepted socket. Version 0.1.1 applies them only before binding/listening and sets only nonblocking mode on accepted sockets. Xbox socket setup errors now name the operation and include the numeric error code; PC disconnect errors identify the phase.
 
-**Still untested:** v0.1.1 transfers on the actual console, retail XNet inheritance/half-close behavior, display modes beyond the initial launch, all controller/exit paths, route selection, CUsbEnet interaction, and sustained USB throughput. A successful build and host tests cannot establish hardware stability.
+The next v0.1.1 hardware attempt progressed past LAN setup and request parsing, then reported `RECEIVE BUFFER SETUP FAILED (10022)`. A later attempt reported the generic listen failure. Version 0.1.2 removes accepted-socket send/receive buffer resizing, retaining and querying the actual startup buffers. It applies SO_REUSEADDR before bind and distinguishes socket creation, bind, listen and wait errors with their numeric codes. The exact cause of the earlier generic listen failure is still unknown; no numeric bind/listen error was available in that build.
+
+**Still untested:** v0.1.2 transfers and listener restart on the actual console, retail XNet half-close behavior, display modes beyond the initial launch, all controller/exit paths, route selection, CUsbEnet interaction, and sustained USB throughput. A successful build and host tests cannot establish hardware stability.
 
 First console test: keep the known-working driver loaded, launch this app manually, run one 10-second test in each direction at 64 KiB, verify both completed results, then press B and Back. Do not configure it as a boot plugin. Only proceed to repeated driver comparisons after this succeeds.

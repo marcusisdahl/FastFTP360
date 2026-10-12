@@ -33,9 +33,18 @@ static void Failure(const char* message) {
 static DWORD WINAPI ServerThread(void*) {
     char error[100]={0};
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-    bool ready=listener!=INVALID_SOCKET && nb::PrepareListener(listener,error,sizeof(error));
+    bool ready=listener!=INVALID_SOCKET;
+    if(!ready) _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTENER SOCKET CREATE FAILED (%d)",WSAGetLastError());
+    if(ready) ready=nb::PrepareListener(listener,error,sizeof(error));
     sockaddr_in address={0}; address.sin_family=AF_INET; address.sin_addr.s_addr=INADDR_ANY; address.sin_port=htons(nb::Port);
-    if(ready) ready=bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address))==0 && listen(listener,1)==0;
+    if(ready && bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,sizeof(error),_TRUNCATE,"BIND PORT 36020 FAILED (%d)",code); ready=false;
+    }
+    if(ready && listen(listener,1)) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTEN PORT 36020 FAILED (%d)",code); ready=false;
+    }
     if(!ready) Failure(error[0]?error:"COULD NOT LISTEN ON PORT 36020");
     else {
         Progress(NULL,nb::Listening,0,0,0,0);
@@ -44,7 +53,9 @@ static DWORD WINAPI ServerThread(void*) {
             fd_set read; FD_ZERO(&read); FD_SET(listener,&read); timeval timeout={0,100000};
             int selected=select(0,&read,NULL,NULL,&timeout);
             if(selected==0) continue;
-            if(selected==SOCKET_ERROR) { Failure("LISTENER ERROR - PRESS A TO RETRY"); break; }
+            if(selected==SOCKET_ERROR) {
+                _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTENER WAIT FAILED (%d)",WSAGetLastError()); Failure(error); break;
+            }
             SOCKET client=accept(listener,NULL,NULL);
             if(client==INVALID_SOCKET) continue;
             nb::Result result;
