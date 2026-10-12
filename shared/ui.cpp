@@ -4,7 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 namespace nb {
-UiState::UiState() : phase(0),direction(0),duration(20),armed(0),completed(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0) {
+UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),rateLimit(0),options(0),downloadLimit(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0) {
     strcpy_s(ip,"WAITING FOR NETWORK"); message[0]=0;
 }
 // Original compact bitmap lettering. No external font or SDK media assets.
@@ -49,11 +49,14 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     const unsigned int bg=0xFF0F1725,card=0xFF192537,white=0xFFE2EBF4,muted=0xFF8FA6BA,green=0xFF3ED9BC,blue=0xFF73B8FF;
     Painter p(rectangle,context); char text[128];
     p.Box(0,0,1280,720,bg); p.Box(56,48,7,44,green);
-    p.Text("NETBENCH360",80,52,5,white); p.Text("RAM NETWORK BENCHMARK / V0.1.2",80,105,2,muted);
+    p.Text("NETBENCH360",80,52,5,white); p.Text("RAM NETWORK DIAGNOSTIC / V0.1.3",80,105,2,muted);
     p.Text("XBOX IP",832,53,2,muted); p.Text(s.ip,832,78,2,white,30);
     p.Text("PORT 36020",832,107,2,muted);
     p.Box(56,163,564,132,card); p.Box(660,163,564,132,card);
-    p.Text("PC TO XBOX",80,184,2,green); p.Text("XBOX TO PC",684,184,2,blue);
+    p.Text("PC TO XBOX",80,184,2,green);
+    if(s.downloadLimit) _snprintf_s(text,sizeof(text),_TRUNCATE,"XBOX TO PC / CAP %d MIB/S",s.downloadLimit);
+    else strcpy_s(text,"XBOX TO PC");
+    p.Text(text,684,184,2,blue);
     if(s.upload>0) _snprintf_s(text,sizeof(text),_TRUNCATE,"%.2f",s.upload); else strcpy_s(text,"--.--");
     p.Text(text,80,220,6,white); p.Text("MIB/S",334,239,2,muted);
     if(s.download>0) _snprintf_s(text,sizeof(text),_TRUNCATE,"%.2f",s.download); else strcpy_s(text,"--.--");
@@ -72,6 +75,7 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     if(fraction>1) fraction=1; if(fraction<0) fraction=0;
     if(fraction>0) p.Box(56,447,int(1168*fraction),8,green);
     if(s.message[0]) p.Text(s.message,56,489,2,s.phase==7?0xFFFFAC8B:white,94);
+    else if(s.options&1) p.Text("DRAWING PAUSED DURING TRANSFER. PC SHOWS LIVE PROGRESS.",56,489,2,muted);
     else p.Text("ONE TCP STREAM / DATA CHECK / WARM-UP / TIMED TRANSFER",56,489,2,muted);
     p.Text("RESULTS ABOVE ARE THE LATEST COMPLETED RUN IN EACH DIRECTION.",56,532,2,muted);
     p.Text("SAVE REPEATS AND MEDIANS FROM THE WINDOWS APP.",56,563,2,muted);

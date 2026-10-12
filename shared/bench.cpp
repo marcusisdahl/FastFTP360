@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 namespace nb {
-Result::Result() : direction(0), seconds(0), sendBuffer(0), recvBuffer(0), samples(0),
+Result::Result() : direction(0), seconds(0), sendBuffer(0), recvBuffer(0), samples(0), rateLimit(0), options(0),
     bytes(0), microseconds(0), minimum(0), maximum(0) {}
 double Result::Rate() const { return microseconds ? double(bytes) / 1.048576 / double(microseconds) : 0; }
 DWORD Read32(const unsigned char* p) { return (DWORD(p[0])<<24)|(DWORD(p[1])<<16)|(DWORD(p[2])<<8)|p[3]; }
@@ -96,6 +96,7 @@ public:
             int got=recv(socket_,reinterpret_cast<char*>(data),count,0);
             if (got>=0) { if(got) lastActivity_=Now(); return got; }
             if (WSAGetLastError()!=WSAEWOULDBLOCK) { Stop("Connection interrupted while receiving"); return -1; }
+            Sleep(1);
         }
     }
     bool ReceiveAll(unsigned char* data,int count) {
@@ -106,20 +107,36 @@ public:
     bool SendAll(const unsigned char* data,int count) {
         while(count) {
             if (!Wait(true)) return false;
-            int sent=send(socket_,reinterpret_cast<const char*>(data),count,0);
-            if(sent>0) { data+=sent; count-=sent; lastActivity_=Now(); }
+            int size=count>WriteSize ? WriteSize : count;
+            int sent=send(socket_,reinterpret_cast<const char*>(data),size,0);
+            if(sent>0) { data+=sent; count-=sent; lastActivity_=Now(); Sleep(0); }
             else if(sent==0 || WSAGetLastError()!=WSAEWOULDBLOCK) return Stop("Connection interrupted while sending");
+            else Sleep(1);
         }
         return true;
     }
     void Progress(Phase phase,DWORD direction,U64 bytes,double seconds,double rate) {
         if(observer_.progress) observer_.progress(observer_.context,phase,direction,bytes,seconds,rate);
     }
-    void Configure(DWORD seconds) { if(observer_.configured) observer_.configured(observer_.context,seconds); }
+    bool Configure(DWORD seconds,DWORD limit,DWORD options) {
+        return !observer_.configured || observer_.configured(observer_.context,seconds,limit,options) || Stop("UI PAUSE HANDSHAKE FAILED");
+    }
+    bool Pace(double until) {
+        while(Now()<until) {
+            if(observer_.cancelled && observer_.cancelled(observer_.context)) return Stop("Cancelled");
+            if(Now()>deadline_) return Stop("Session time limit reached");
+            Sleep(1);
+        }
+        return true;
+    }
 };
-static bool ExchangeFixed(Connection& c,bool sender,unsigned char* data,unsigned char* expected,DWORD bytes,bool verify) {
+static bool ExchangeFixed(Connection& c,bool sender,unsigned char* data,unsigned char* expected,DWORD bytes,bool verify,DWORD limit) {
     for(DWORD offset=0;offset<bytes;offset+=Chunk) {
-        if(sender) { if(!c.SendAll(expected,Chunk)) return false; }
+        if(sender) {
+            double start=Now();
+            if(!c.SendAll(expected,Chunk)) return false;
+            if(limit && !c.Pace(start+double(Chunk)/(limit*1048576.0))) return false;
+        }
         else {
             if(!c.ReceiveAll(data,Chunk)) return false;
             if(verify && memcmp(data,expected,Chunk)) return c.Stop("Integrity check failed");
@@ -135,15 +152,24 @@ static void EncodeResult(unsigned char* wire,const Result& r) {
     Write32(wire+32,DWORD(r.minimum*1024)); Write32(wire+36,DWORD(r.maximum*1024));
     Write32(wire+40,r.sendBuffer); Write32(wire+44,r.recvBuffer); Write32(wire+48,r.samples);
     Write32(wire+52,IntegrityBytes);
+    Write32(wire+56,r.rateLimit); Write32(wire+60,r.options);
 }
 static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigned char* expected) {
     unsigned char request[RequestSize], response[RequestSize]={0};
-    if(!c.ReceiveAll(request,RequestSize)) return false;
+    if(!c.ReceiveAll(request,32)) return false;
+    Write32(response,Magic); Write32(response+4,Version);
+    if(Read32(request)!=Magic || Read32(request+4)!=Version) {
+        Write32(response+8,1); c.SendAll(response,32); return c.Stop("UPDATE BOTH APPS TO PROTOCOL V2");
+    }
+    if(!c.ReceiveAll(request+32,8)) return false;
     DWORD direction=Read32(request+8),seconds=Read32(request+12),chunk=Read32(request+16),
-        socketBuffer=Read32(request+20),warmupMiB=Read32(request+24),seed=Read32(request+28);
+        socketBuffer=Read32(request+20),warmupMiB=Read32(request+24),seed=Read32(request+28),
+        rateLimit=Read32(request+32),options=Read32(request+36);
     bool valid=Read32(request)==Magic && Read32(request+4)==Version && (direction==1 || direction==2) &&
         seconds>=1 && seconds<=60 && chunk==Chunk && (socketBuffer==16384 || socketBuffer==32768 ||
-        socketBuffer==65536 || socketBuffer==131072) && warmupMiB>=1 && warmupMiB<=64;
+        socketBuffer==65536 || socketBuffer==131072) && warmupMiB>=1 && warmupMiB<=64 &&
+        (rateLimit==0 || rateLimit==8 || rateLimit==12 || rateLimit==16 || rateLimit==20 || rateLimit==24 || rateLimit==32) &&
+        (options&~DWORD(PauseDrawing))==0;
     Write32(response,Magic); Write32(response+4,Version); Write32(response+8,valid ? 0 : 1);
     if(!valid) { c.SendAll(response,RequestSize); return c.Stop("Unsupported test request"); }
     // XNet on the tested retail console rejects SO_RCVBUF on an accepted TCP
@@ -155,16 +181,19 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
     length=sizeof(int);
     if(getsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<char*>(&actualRecv),&length)) return c.StopSocket("RECEIVE BUFFER QUERY FAILED");
     r.direction=direction; r.seconds=seconds; r.sendBuffer=actualSend; r.recvBuffer=actualRecv;
-    c.Configure(seconds);
+    r.rateLimit=direction==2 ? rateLimit : 0; r.options=options;
+    c.Progress(Verifying,direction,0,0,0);
+    if(!c.Configure(seconds,r.rateLimit,options)) return false;
     Write32(response+12,Chunk); Write32(response+16,actualSend); Write32(response+20,actualRecv);
     Write32(response+24,IntegrityBytes); Write32(response+28,warmupMiB);
+    Write32(response+32,r.rateLimit); Write32(response+36,options);
     if(!c.SendAll(response,RequestSize)) return false;
     Pattern(expected,seed);
     bool sender=direction==2;
     c.Progress(Verifying,direction,0,0,0);
-    if(!ExchangeFixed(c,sender,data,expected,IntegrityBytes,true)) return false;
+    if(!ExchangeFixed(c,sender,data,expected,IntegrityBytes,true,r.rateLimit)) return false;
     c.Progress(Warming,direction,0,0,0);
-    if(!ExchangeFixed(c,sender,data,expected,warmupMiB*1048576,false)) return false;
+    if(!ExchangeFixed(c,sender,data,expected,warmupMiB*1048576,false,r.rateLimit)) return false;
     c.Progress(Measuring,direction,0,0,0);
     double begin=Now(),lastSample=begin,lastUpdate=begin,currentRate=0;
     U64 sampleBytes=0;
@@ -172,8 +201,10 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
     for(;;) {
         if(sender) {
             if(Now()-begin>=seconds) break;
+            double sentAt=Now();
             if(!c.SendAll(expected,Chunk)) return false;
             r.bytes+=Chunk;
+            if(r.rateLimit && !c.Pace(sentAt+double(Chunk)/(r.rateLimit*1048576.0))) return false;
         } else {
             int got=c.Receive(data,Chunk);
             if(got<0) return false;
@@ -205,7 +236,8 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
         if(!c.ReceiveAll(wire,ResultSize)) return false;
         U64 elapsed=Read64(wire+24);
         if(Read32(wire)!=Magic || Read32(wire+4)!=Version || Read32(wire+8)!=direction || Read32(wire+12)!=0 ||
-           Read64(wire+16)!=r.bytes || elapsed==0 || elapsed>180000000 || Read32(wire+52)!=IntegrityBytes)
+           Read64(wire+16)!=r.bytes || elapsed==0 || elapsed>180000000 || Read32(wire+52)!=IntegrityBytes ||
+           Read32(wire+56)!=r.rateLimit || Read32(wire+60)!=r.options)
             return c.Stop("Receiver result did not match transfer");
         r.microseconds=elapsed; r.minimum=double(Read32(wire+32))/1024; r.maximum=double(Read32(wire+36))/1024;
         r.samples=Read32(wire+48);

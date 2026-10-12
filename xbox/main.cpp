@@ -9,6 +9,7 @@ static CRITICAL_SECTION StateLock;
 static nb::UiState State;
 static volatile LONG Cancel=0;
 static HANDLE Worker=NULL;
+static HANDLE GraphicsIdle=NULL;
 static bool NetworkReady=false;
 static IDirect3DDevice9* Device=NULL;
 static IDirect3DVertexShader9* VertexShader=NULL;
@@ -25,7 +26,20 @@ static void Progress(void*,nb::Phase phase,DWORD direction,nb::U64 bytes,double 
     State.elapsed=elapsed; State.rate=rate; State.message[0]=0;
     LeaveCriticalSection(&StateLock);
 }
-static void Configure(void*,DWORD seconds) { EnterCriticalSection(&StateLock); State.duration=seconds; LeaveCriticalSection(&StateLock); }
+static bool Configure(void*,DWORD seconds,DWORD limit,DWORD options) {
+    if(options&nb::PauseDrawing) {
+        if(!GraphicsIdle || !ResetEvent(GraphicsIdle)) return false;
+    }
+    EnterCriticalSection(&StateLock);
+    State.duration=seconds; State.rateLimit=limit; State.options=options;
+    LeaveCriticalSection(&StateLock);
+    if(!(options&nb::PauseDrawing)) return true;
+    double deadline=nb::Now()+5;
+    while(!IsCancelled(NULL) && nb::Now()<deadline) {
+        if(WaitForSingleObject(GraphicsIdle,100)==WAIT_OBJECT_0) return true;
+    }
+    return false;
+}
 static void Failure(const char* message) {
     EnterCriticalSection(&StateLock); State.phase=nb::Failed;
     _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"%s",message); LeaveCriticalSection(&StateLock);
@@ -61,9 +75,10 @@ static DWORD WINAPI ServerThread(void*) {
             nb::Result result;
             bool ok=nb::Serve(client,observer,result,error,sizeof(error));
             closesocket(client);
+            EnterCriticalSection(&StateLock); State.options=0; LeaveCriticalSection(&StateLock);
             if(ok) {
                 EnterCriticalSection(&StateLock);
-                if(result.direction==1) State.upload=result.Rate(); else State.download=result.Rate();
+                if(result.direction==1) State.upload=result.Rate(); else { State.download=result.Rate(); State.downloadLimit=result.rateLimit; }
                 ++State.completed;
                 strcpy_s(State.message,"DATA CHECK PASSED. READY FOR THE NEXT PC TEST.");
                 LeaveCriticalSection(&StateLock);
@@ -120,12 +135,13 @@ static void Render(const nb::UiState& state) {
 void __cdecl main() {
     InitializeCriticalSection(&StateLock);
     if(!InitGraphics()) XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);
+    GraphicsIdle=CreateEvent(NULL,TRUE,FALSE,NULL);
     XNetStartupParams network={0}; network.cfgSizeOfStruct=sizeof(network); network.cfgFlags=XNET_STARTUP_BYPASS_SECURITY;
     network.cfgSockDefaultRecvBufsizeInK=64; network.cfgSockDefaultSendBufsizeInK=64;
     bool xnet=XNetStartup(&network)==0; WSADATA wsa;
     NetworkReady=xnet && WSAStartup(MAKEWORD(2,2),&wsa)==0;
     if(!NetworkReady) Failure("NETWORK STARTUP FAILED. BACK TO EXIT.");
-    WORD previous=0; double lastAddress=0;
+    WORD previous=0; double lastAddress=0; bool renderingPaused=false;
     for(;;) {
         if(Worker && WaitForSingleObject(Worker,0)==WAIT_OBJECT_0) { CloseHandle(Worker); Worker=NULL; }
         if(NetworkReady && nb::Now()-lastAddress>=1) {
@@ -148,10 +164,17 @@ void __cdecl main() {
         if(pressed&XINPUT_GAMEPAD_B) InterlockedExchange(&Cancel,1);
         if((pressed&XINPUT_GAMEPAD_BACK) && !Worker) break;
         EnterCriticalSection(&StateLock); nb::UiState snapshot=State; LeaveCriticalSection(&StateLock);
-        Render(snapshot);
+        if(snapshot.armed && (snapshot.options&nb::PauseDrawing)) {
+            if(!renderingPaused) {
+                strcpy_s(snapshot.message,"DRAWING PAUSED. USE PC FOR LIVE PROGRESS. B STILL STOPS.");
+                Render(snapshot); Device->BlockUntilIdle(); renderingPaused=true;
+            }
+            if(GraphicsIdle) SetEvent(GraphicsIdle);
+        } else { renderingPaused=false; Render(snapshot); }
         // Ten UI updates per second keep rendering work modest during a test.
         Sleep(100);
     }
     if(NetworkReady) WSACleanup(); if(xnet) XNetCleanup();
+    if(GraphicsIdle) CloseHandle(GraphicsIdle);
     XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);
 }

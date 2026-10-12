@@ -3,7 +3,7 @@
 namespace nb {
 struct UiState {
     char ip[48],message[100];
-    int phase,direction,duration,armed,completed;
+    int phase,direction,duration,armed,completed,rateLimit,options,downloadLimit;
     double elapsed,rate,upload,download,mebibytes;
     UiState();
 };

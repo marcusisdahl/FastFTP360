@@ -1,5 +1,16 @@
 # Changes
 
+## 0.1.3 diagnostic
+
+- Respond to a reported whole-console freeze during unlimited Xbox-to-PC testing; the cause remains unknown.
+- Split sends into at most 16 KiB calls; yield successful C++ sends and sleep before would-block retries.
+- Negotiate an Xbox send cap covering integrity, warm-up and timed data; default to 16 MiB/s. Mark caps in the UI/CSV and keep medians separate.
+- Optionally pause Xbox drawing after GPU-idle acknowledgement while still polling the controller. PC progress remains live.
+- Default to one 10-second Xbox-to-PC run. Add cap, diagnostic metadata, slow-receiver and forced would-block tests.
+- Use protocol v2: **both applications must be updated**. Old v1 peers fail promptly.
+
+This is an unvalidated diagnostic revision, not a proven crash fix. Use the known-working Baseline driver for the first control. See the crash investigation notes.
+
 ## 0.1.2
 
 - Avoid receive-buffer setup error 10022 by keeping accepted sockets' buffers instead of resizing them; report their actual sizes.

@@ -1,16 +1,18 @@
-# NB36 protocol v1
+# NB36 protocol v2 (application v0.1.3)
 
 All fields are unsigned **big endian**, including the 64-bit counters. A connection contains one test. Direction 1 means PC sends, Xbox receives; direction 2 means Xbox sends, PC receives. Single TCP stream, port 36020.
 
-The 32-byte request contains eight uint32 fields: magic `0x4E423336`, version `1`, direction, duration seconds, chunk bytes `65536`, requested socket bytes, warm-up MiB, and pattern seed. Allowed duration 1-60, buffers 16384/32768/65536/131072, warm-up 1-64. Reject unsupported fields before allocating large or unbounded resources.
+The 40-byte request contains ten uint32 fields: magic `0x4E423336`, version `2`, direction, duration seconds, chunk bytes `65536`, requested PC socket bytes, warm-up MiB, pattern seed, Xbox send limit in MiB/s, and diagnostic options. Allowed duration 1-60, buffers 16384/32768/65536/131072, warm-up 1-64. Limits allowed: 0 (unlimited), 8, 12, 16, 20, 24, 32. Option bit 0 means pause Xbox rendering; other bits are rejected. Reject unsupported fields before allocating large or unbounded resources.
 
-As of application v0.1.2, requested socket bytes describe the PC setting. The Xbox does not resize an accepted socket: it requests 64 KiB defaults at XNet startup and reports actual send/receive sizes in the response. This preserves protocol v1 compatibility; clients must use actual sizes rather than assuming the Xbox honored the PC request.
+Requested socket bytes describe the PC setting. The Xbox does not resize an accepted socket: it requests 64 KiB defaults at XNet startup and reports actual send/receive sizes. Clients must use actual sizes rather than assuming the Xbox honored the PC request.
 
-The 32-byte response contains eight uint32 fields: magic, version, status (0 accepted, 1 invalid request), chunk bytes, actual Xbox send buffer, actual Xbox receive buffer, integrity bytes `1048576`, warm-up MiB. On rejection, fields after status are zero and the connection closes.
+The 40-byte response contains ten uint32 fields: magic, version, status (0 accepted, 1 invalid request), chunk bytes, actual Xbox send buffer, actual Xbox receive buffer, integrity bytes `1048576`, warm-up MiB, effective Xbox send limit, and acknowledged options. Effective limit is zero for PC-to-Xbox because that sender is the PC. On rejection, fields after status are zero and the connection closes. An unsupported magic/version is rejected after reading the first 32 bytes, with a 32-byte error response; clients validate that base response before reading the eight-byte settings extension. This fails promptly for old v1 clients rather than waiting for fields they never send.
+
+When pausing is requested, the Xbox main thread renders one static status screen and waits for the GPU to become idle. The worker waits for that acknowledgement before sending its acceptance response or benchmark data. The main thread continues polling controllers but draws no more frames during that session. The settings are diagnostic metadata, not a security boundary.
 
 The pattern is xorshift32, initialized to the supplied seed (zero becomes one): `s ^= s << 13; s ^= s >> 17; s ^= s << 5`, with uint32 wrapping; each output byte is the low byte after the three operations. Generate 65536 bytes once and repeat that block. Integrity and warm-up use exact block counts. After each phase, the receiver sends a four-byte zero ACK; a failure closes the connection. Only the integrity phase validates bytes.
 
-The timed sender loops through whole 65536-byte blocks until its timer reaches the requested duration. Then it sends this **32-byte finish record** and shuts down only its send half:
+The timed sender loops through whole 65536-byte blocks until its timer reaches the requested duration. Individual send calls use at most 16384 bytes, handle partial writes, yield after success in the C++ engine, and sleep briefly before retrying would-block. When capped, Xbox sending is paced after each block in all three data phases; cap waiting is included in the timed measurement. Then the sender sends this **32-byte finish record** and shuts down only its send half:
 
 | Offset | Width | Field |
 |---|---|---|
@@ -37,8 +39,9 @@ The receiver retains the final 32 stream bytes until EOF. It validates the recor
 | 44 | 4 | Xbox actual receive buffer |
 | 48 | 4 | Full interval sample count |
 | 52 | 4 | Integrity bytes, 1048576 |
-| 56 | 8 | Reserved, zero |
+| 56 | 4 | Effective Xbox send limit, MiB/s |
+| 60 | 4 | Acknowledged diagnostic options |
 
-The sender validates result magic/version/direction/status, equal payload bytes, nonzero elapsed time no more than 180 seconds, and integrity phase size. Its displayed final average uses the receiver's result. Local live rate while sending is provisional. All partial TCP reads/writes are handled; cancellation is polled at most every 100 ms while waiting. One worker owns the socket throughout its lifetime.
+The sender validates result magic/version/direction/status, equal payload bytes, nonzero elapsed time no more than 180 seconds, integrity phase size, send limit and options. Its displayed final average uses the receiver's result. Local live rate while sending is provisional. All partial TCP reads/writes are handled; cancellation is polled at most every 100 ms while waiting, and during pacing. One worker owns the socket throughout its lifetime.
 
 This is a diagnostic protocol for cooperating trusted peers. It is not authenticated, and byte-count agreement or a finish record is not cryptographic proof of valid payload.
