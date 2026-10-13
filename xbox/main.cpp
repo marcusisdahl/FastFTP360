@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "../shared/bench.h"
 #include "../shared/ui.h"
+#include "../shared/ftp.h"
 
 static CRITICAL_SECTION StateLock;
 static nb::UiState State;
@@ -39,6 +40,24 @@ enum { DiskTestBytes=256*1048576 };
 struct KernelString { USHORT length,capacity; char* text; };
 extern "C" LONG __stdcall ObCreateSymbolicLink(KernelString* link,KernelString* device);
 extern "C" LONG __stdcall ObDeleteSymbolicLink(KernelString* link);
+
+// Links a DOS-style name such as \??\NBHDD: to a kernel device path.
+static LONG LinkDrive(const char* name,const char* device) {
+    char nameText[32],deviceText[64]; strcpy_s(nameText,name); strcpy_s(deviceText,device);
+    KernelString link={USHORT(strlen(nameText)),USHORT(sizeof(nameText)),nameText};
+    KernelString target={USHORT(strlen(deviceText)),USHORT(sizeof(deviceText)),deviceText};
+    ObDeleteSymbolicLink(&link); // Left over from an interrupted run.
+    return ObCreateSymbolicLink(&link,&target);
+}
+static void UnlinkDrive(const char* name) {
+    char nameText[32]; strcpy_s(nameText,name);
+    KernelString link={USHORT(strlen(nameText)),USHORT(sizeof(nameText)),nameText};
+    ObDeleteSymbolicLink(&link);
+}
+// FTP folders backed by drives. A drive is listed only if its root can be read.
+struct FtpDrive { const char* name; const char* link; const char* path; const char* device; };
+static const FtpDrive FtpDrives[]={{"HDD","\\??\\NBHDD:","NBHDD:","\\Device\\Harddisk0\\Partition1"},
+    {"USB0","\\??\\NBUSB0:","NBUSB0:","\\Device\\Mass0"},{"USB1","\\??\\NBUSB1:","NBUSB1:","\\Device\\Mass1"}};
 
 struct Stream {
     HANDLE thread;
@@ -170,15 +189,10 @@ static void DiskFailure(const char* format,const char* drive,DWORD code) {
 static DWORD WINAPI DiskThread(void*) {
     const DiskTarget& target=DiskTargets[DiskChoice];
     const DWORD block=DiskBlocks[DiskBlockChoice];
-    char linkText[]="\\??\\NBDISK:";
-    KernelString link={USHORT(strlen(linkText)),USHORT(sizeof(linkText)),linkText};
     bool linked=false;
     const char* path="game:\\NETBENCH360-DISKTEST.TMP";
     if(target.device) {
-        char deviceText[64]; strcpy_s(deviceText,target.device);
-        KernelString device={USHORT(strlen(deviceText)),USHORT(sizeof(deviceText)),deviceText};
-        ObDeleteSymbolicLink(&link); // Left over from an interrupted run.
-        LONG status=ObCreateSymbolicLink(&link,&device);
+        LONG status=LinkDrive("\\??\\NBDISK:",target.device);
         if(status<0) { DiskFailure("%s NOT FOUND OR NOT MOUNTABLE (0X%08X)",target.name,DWORD(status)); return 0; }
         linked=true; path="NBDISK:\\NETBENCH360-DISKTEST.TMP";
     }
@@ -236,7 +250,7 @@ static DWORD WINAPI DiskThread(void*) {
     }
     if(buffer) VirtualFree(buffer,0,MEM_RELEASE);
     if(check) VirtualFree(check,0,MEM_RELEASE);
-    if(linked) ObDeleteSymbolicLink(&link);
+    if(linked) UnlinkDrive("\\??\\NBDISK:");
     EnterCriticalSection(&StateLock);
     State.diskPhase=0;
     if(ok) {
@@ -246,6 +260,63 @@ static DWORD WINAPI DiskThread(void*) {
         strcpy_s(State.message,"DISK TEST PASSED. TEST FILE DELETED.");
     } else if(IsCancelled(NULL)) { State.phase=nb::Stopped; strcpy_s(State.message,"DISK TEST STOPPED. TEST FILE DELETED."); }
     LeaveCriticalSection(&StateLock);
+    return 0;
+}
+static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,double seconds,bool done,bool ok) {
+    EnterCriticalSection(&StateLock);
+    double mib=double(bytes)/1048576,rate=seconds>0 ? mib/seconds : 0;
+    const char* kind=operation[0]=='S' ? "UPLOAD" : "DOWNLOAD";
+    if(done) {
+        State.ftpPhase=1;
+        if(ok) _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"LAST %s %.1f MIB IN %.1f S / %.2f MIB/S",kind,mib,seconds,rate);
+        else _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"LAST %s FAILED AFTER %.1f MIB",kind,mib);
+    } else {
+        State.ftpPhase=operation[0]=='S' ? 2 : 3; State.mebibytes=mib; State.elapsed=seconds; State.rate=rate;
+    }
+    LeaveCriticalSection(&StateLock);
+}
+// Passive-mode FTP server on port 21 until B. Folders: mounted drives that can
+// be read, the app's own drive, and NULL (network only, no disk).
+static DWORD WINAPI FtpThread(void*) {
+    nb::FtpRoot roots[5]; int count=0; bool linked[3]={false,false,false};
+    char folders[100]="FOLDERS:";
+    for(int i=0;i<3;++i) {
+        if(LinkDrive(FtpDrives[i].link,FtpDrives[i].device)<0) continue;
+        char pattern[16]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\*",FtpDrives[i].path);
+        WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(pattern,&entry);
+        bool readable=find!=INVALID_HANDLE_VALUE || GetLastError()==ERROR_FILE_NOT_FOUND;
+        if(find!=INVALID_HANDLE_VALUE) FindClose(find);
+        if(!readable) { UnlinkDrive(FtpDrives[i].link); continue; }
+        linked[i]=true; roots[count].name=FtpDrives[i].name; roots[count].path=FtpDrives[i].path; ++count;
+        strcat_s(folders," "); strcat_s(folders,FtpDrives[i].name);
+    }
+    roots[count].name="APP"; roots[count].path="game:"; ++count;
+    roots[count].name="NULL"; roots[count].path=NULL; ++count;
+    strcat_s(folders," APP NULL / PASSIVE MODE / B STOPS THE SERVER");
+    char error[100]={0};
+    SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+    bool ready=listener!=INVALID_SOCKET;
+    if(!ready) _snprintf_s(error,sizeof(error),_TRUNCATE,"FTP SOCKET CREATE FAILED (%d)",WSAGetLastError());
+    if(ready && BufferChoices[BufferChoice]) ready=nb::SetSocketBuffers(listener,BufferChoices[BufferChoice],error,sizeof(error));
+    if(ready) ready=nb::PrepareListener(listener,error,sizeof(error));
+    sockaddr_in address={0}; address.sin_family=AF_INET; address.sin_addr.s_addr=INADDR_ANY; address.sin_port=htons(nb::FtpPort);
+    if(ready && bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address))) {
+        _snprintf_s(error,sizeof(error),_TRUNCATE,"BIND FTP PORT 21 FAILED (%d)",WSAGetLastError()); ready=false;
+    }
+    if(ready && listen(listener,8)) { _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTEN FTP PORT 21 FAILED (%d)",WSAGetLastError()); ready=false; }
+    if(ready) {
+        XNADDR xnaddr={0}; XNetGetTitleXnAddr(&xnaddr);
+        EnterCriticalSection(&StateLock);
+        State.ftpPhase=1; State.phase=nb::Idle; State.ftp[0]=0; strcpy_s(State.message,folders);
+        LeaveCriticalSection(&StateLock);
+        nb::FtpObserver observer={NULL,IsCancelled,FtpProgress};
+        if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],0,observer,error,sizeof(error))) ready=false;
+    }
+    if(listener!=INVALID_SOCKET) closesocket(listener);
+    for(int i=0;i<3;++i) if(linked[i]) UnlinkDrive(FtpDrives[i].link);
+    EnterCriticalSection(&StateLock); State.ftpPhase=0; State.armed=0; LeaveCriticalSection(&StateLock);
+    if(!ready && !IsCancelled(NULL)) Failure(error[0] ? error : "FTP SERVER FAILED");
+    else { EnterCriticalSection(&StateLock); State.phase=nb::Stopped; strcpy_s(State.message,"FTP SERVER STOPPED."); LeaveCriticalSection(&StateLock); }
     return 0;
 }
 static DWORD WINAPI ServerThread(void*) {
@@ -361,6 +432,12 @@ void __cdecl main() {
             EnterCriticalSection(&StateLock); State.armed=1; State.message[0]=0; LeaveCriticalSection(&StateLock);
             Worker=CreateThread(NULL,128*1024,ServerThread,NULL,0,NULL);
             if(!Worker) { Failure("COULD NOT START WORKER"); EnterCriticalSection(&StateLock); State.armed=0; LeaveCriticalSection(&StateLock); }
+        }
+        if((pressed&XINPUT_GAMEPAD_LEFT_SHOULDER) && NetworkReady && !Worker) {
+            InterlockedExchange(&Cancel,0);
+            EnterCriticalSection(&StateLock); State.armed=1; State.message[0]=0; LeaveCriticalSection(&StateLock);
+            Worker=CreateThread(NULL,128*1024,FtpThread,NULL,0,NULL);
+            if(!Worker) { EnterCriticalSection(&StateLock); State.armed=0; LeaveCriticalSection(&StateLock); Failure("COULD NOT START FTP SERVER"); }
         }
         if((pressed&XINPUT_GAMEPAD_X) && !Worker) {
             InterlockedExchange(&Cancel,0);

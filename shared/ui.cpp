@@ -4,8 +4,8 @@
 #include <string.h>
 #include <ctype.h>
 namespace nb {
-UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
-    strcpy_s(ip,"WAITING FOR NETWORK"); message[0]=0; settings[0]=0; disk[0]=0;
+UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
+    strcpy_s(ip,"WAITING FOR NETWORK"); message[0]=0; settings[0]=0; disk[0]=0; ftp[0]=0;
 }
 // Original compact bitmap lettering. No external font or SDK media assets.
 static const char Alphabet[]=" ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.:/-()%+?";
@@ -49,7 +49,7 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     const unsigned int bg=0xFF0F1725,card=0xFF192537,white=0xFFE2EBF4,muted=0xFF8FA6BA,green=0xFF3ED9BC,blue=0xFF73B8FF;
     Painter p(rectangle,context); char text[128];
     p.Box(0,0,1280,720,bg); p.Box(56,48,7,44,green);
-    p.Text("NETBENCH360",80,52,5,white); p.Text("RAM NETWORK AND DISK DIAGNOSTIC / V0.2.1",80,105,2,muted);
+    p.Text("NETBENCH360",80,52,5,white); p.Text("NETWORK / DISK / FTP DIAGNOSTIC / V0.3.0",80,105,2,muted);
     p.Text("XBOX IP",832,53,2,muted); p.Text(s.ip,832,78,2,white,30);
     p.Text("PORT 36020",832,107,2,muted);
     p.Box(56,163,564,132,card); p.Box(660,163,564,132,card);
@@ -62,10 +62,18 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     if(s.download>0) _snprintf_s(text,sizeof(text),_TRUNCATE,"%.2f",s.download); else strcpy_s(text,"--.--");
     p.Text(text,684,220,6,white); p.Text("MIB/S",938,239,2,muted);
     static const char* phases[]={"READY", "WAITING FOR PC", "CONNECTING", "CHECKING DATA", "WARMING UP", "MEASURING", "COMPLETE", "ERROR", "STOPPED"};
-    if(s.diskPhase) p.Text(s.diskPhase==1 ? "DISK WRITE" : "DISK READ",56,336,3,green);
+    static const char* ftpPhases[]={"","FTP SERVER ON","FTP UPLOAD","FTP DOWNLOAD"};
+    if(s.ftpPhase>0 && s.ftpPhase<4) p.Text(ftpPhases[s.ftpPhase],56,336,3,green);
+    else if(s.diskPhase) p.Text(s.diskPhase==1 ? "DISK WRITE" : "DISK READ",56,336,3,green);
     else p.Text(phases[s.phase>=0 && s.phase<=8 ? s.phase : 7],56,336,3,s.phase==7?0xFFFFAC8B:green);
-    if(s.direction && !s.diskPhase) p.Text(s.direction==1 ? "PC TO XBOX" : "XBOX TO PC",880,342,2,muted);
-    if(s.diskPhase) {
+    if(s.direction && !s.diskPhase && !s.ftpPhase) p.Text(s.direction==1 ? "PC TO XBOX" : "XBOX TO PC",880,342,2,muted);
+    if(s.ftpPhase==1) {
+        _snprintf_s(text,sizeof(text),_TRUNCATE,"CONNECT AN FTP CLIENT TO %s PORT 21. ANY USER/PASSWORD.",s.ip);
+        p.Text(text,56,391,2,white,94);
+    } else if(s.ftpPhase>1) {
+        _snprintf_s(text,sizeof(text),_TRUNCATE,"%.2f MIB/S",s.rate); p.Text(text,56,382,4,white);
+        _snprintf_s(text,sizeof(text),_TRUNCATE,"%.1f SEC / %.1f MIB",s.elapsed,s.mebibytes); p.Text(text,640,394,2,muted);
+    } else if(s.diskPhase) {
         _snprintf_s(text,sizeof(text),_TRUNCATE,"%.2f MIB/S",s.rate); p.Text(text,56,382,4,white);
         _snprintf_s(text,sizeof(text),_TRUNCATE,"%.1f SEC / %.0f OF %.0f MIB",s.elapsed,s.mebibytes,s.diskTotal);
         p.Text(text,640,394,2,muted);
@@ -78,20 +86,21 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
         p.Text(s.armed ? "START THE TEST IN THE WINDOWS APP." : "PRESS A TO ALLOW A PC TO CONNECT.",56,391,2,white);
     }
     p.Box(56,447,1168,8,card);
-    double fraction=s.diskPhase ? (s.diskTotal>0 ? s.mebibytes/s.diskTotal : 0) :
+    double fraction=s.ftpPhase ? 0 : s.diskPhase ? (s.diskTotal>0 ? s.mebibytes/s.diskTotal : 0) :
         s.phase==6 ? 1.0 : (s.phase==5 && s.duration>0 ? s.elapsed/s.duration : 0);
     if(fraction>1) fraction=1; if(fraction<0) fraction=0;
     if(fraction>0) p.Box(56,447,int(1168*fraction),8,green);
     if(s.message[0]) p.Text(s.message,56,489,2,s.phase==7?0xFFFFAC8B:white,94);
     else if(s.options&1) p.Text("DRAWING PAUSED DURING TRANSFER. PC SHOWS LIVE PROGRESS.",56,489,2,muted);
     else p.Text("UP TO 4 TCP STREAMS / DATA CHECK / WARM-UP / TIMED TRANSFER",56,489,2,muted);
-    if(s.disk[0]) p.Text(s.disk,56,520,2,white,94);
+    if(s.ftpPhase && s.ftp[0]) p.Text(s.ftp,56,520,2,white,94);
+    else if(s.disk[0]) p.Text(s.disk,56,520,2,white,94);
     else p.Text("RESULTS ABOVE ARE THE LATEST COMPLETED RUN IN EACH DIRECTION.",56,520,2,muted);
     p.Text(s.settings,56,551,2,white,94);
     p.Text(s.armed ? "STOP WITH B TO CHANGE SETTINGS." : "D-PAD: BUFFERS (UP/DOWN) CPU (LEFT/RIGHT)   Y: DISK   RB: DISK BLOCK",56,582,2,muted);
     p.Box(56,620,1168,2,card);
-    p.Text(s.armed ? "A  LISTENING" : "A  START",56,649,2,green);
-    p.Text("B  STOP",300,649,2,white); p.Text("X  DISK TEST",520,649,2,s.armed?muted:white);
-    p.Text("BACK  EXIT WHEN STOPPED",820,649,2,muted);
+    p.Text(s.armed && !s.ftpPhase ? "A  LISTENING" : "A  START",56,649,2,s.ftpPhase?muted:green);
+    p.Text("B  STOP",250,649,2,white); p.Text("X  DISK TEST",410,649,2,s.armed?muted:white);
+    p.Text("LB  FTP SERVER",620,649,2,s.armed?muted:white); p.Text("BACK  EXIT WHEN STOPPED",850,649,2,muted);
 }
 }

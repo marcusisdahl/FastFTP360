@@ -14,7 +14,10 @@ int main(int argc,char** argv) {
     strcpy_s(state.settings,"XBOX BUFFERS: STARTUP 64 KIB / WORKER CPU: AUTO");
     if(argc>2) { state.phase=5; state.direction=1; state.rate=27.48; state.upload=27.34; state.download=24.16; state.elapsed=12.4; state.mebibytes=340.752; state.streams=2; }
     else state.phase=1;
-    if(argc>3) { state.armed=0; state.phase=0; state.diskPhase=1; state.diskTotal=256; state.mebibytes=96; state.elapsed=3.1; state.rate=30.97;
+    if(argc>4) { state.armed=1; state.phase=0; state.ftpPhase=2; state.mebibytes=812.5; state.elapsed=31.2; state.rate=26.04;
+        strcpy_s(state.message,"FOLDERS: HDD USB0 APP NULL / PASSIVE MODE / B STOPS THE SERVER");
+        strcpy_s(state.ftp,"LAST UPLOAD 1024.0 MIB IN 41.3 S / 24.79 MIB/S"); }
+    else if(argc>3) { state.armed=0; state.phase=0; state.diskPhase=1; state.diskTotal=256; state.mebibytes=96; state.elapsed=3.1; state.rate=30.97;
         strcpy_s(state.settings,"XBOX BUFFERS: STARTUP 64 KIB / WORKER CPU: AUTO / DISK: HDD 1024 KIB");
         strcpy_s(state.disk,"DISK USB 0 64 KIB: WRITE 8.52 / READ 24.10 MIB/S / ALL DATA CHECKED"); }
     nb::DrawUi(state,Rectangle,NULL);

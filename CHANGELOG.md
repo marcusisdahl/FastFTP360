@@ -1,5 +1,16 @@
 # Changes
 
+## 0.3.0
+
+- Built-in **FTP server** on the Xbox for comparing with Aurora's FTP. Press **LB** while stopped; **B** stops it. Port 21, passive mode (PASV/EPSV), any user name and password, up to 4 simultaneous connections (FileZilla's default works).
+- Folders: `HDD`, `USB0`, `USB1` (only drives that can be read), `APP` (the app's own drive) and `NULL`. Uploads to `NULL` are discarded and `NULL/<n>MB.bin` downloads stream n MiB of test data, which measures FTP over the network with no disk involved.
+- Disk and network overlap: a helper thread writes behind (uploads) or reads ahead (downloads) through two 1 MiB buffers. Data is sent in 16 KiB pieces with a yield, as in the benchmark.
+- The Xbox screen shows the live FTP rate and the last transfer's average; the 226 reply also reports bytes, seconds and MiB/s to the client.
+- Supported commands: USER PASS SYST FEAT OPTS TYPE MODE STRU NOOP PWD CWD CDUP PASV EPSV LIST NLST RETR STOR SIZE DELE MKD RMD RNFR RNTO REST 0 ABOR QUIT. Active mode (PORT) is refused.
+- The same server source runs on Windows loopback in `tests/ftp.py` (21 checks with Python's ftplib, including path escapes and three simultaneous sessions).
+
+Built and host-tested only. The FTP server has not run on a console yet.
+
 ## 0.2.1
 
 - Xbox-only **disk test**, no network or PC needed. While stopped: **Y** picks the drive (the app's own drive, internal HDD, USB 0, USB 1), **RB** picks the block size (64 KiB, 256 KiB, 1 MiB), **X** runs it.

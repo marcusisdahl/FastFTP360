@@ -24,7 +24,7 @@
     <ImageXex><ConfigurationFile>$(ProjectDir)NetBench360.xml</ConfigurationFile></ImageXex>
     <Deploy><ExcludedFromBuild>true</ExcludedFromBuild></Deploy>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\shared\bench.cpp" /><ClCompile Include="..\shared\ui.cpp" /></ItemGroup>
-  <ItemGroup><ClInclude Include="..\shared\bench.h" /><ClInclude Include="..\shared\ui.h" /><None Include="NetBench360.xml" /></ItemGroup>
+  <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\shared\bench.cpp" /><ClCompile Include="..\shared\ui.cpp" /><ClCompile Include="..\shared\ftp.cpp" /></ItemGroup>
+  <ItemGroup><ClInclude Include="..\shared\bench.h" /><ClInclude Include="..\shared\ui.h" /><ClInclude Include="..\shared\ftp.h" /><None Include="NetBench360.xml" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

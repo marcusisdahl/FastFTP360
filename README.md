@@ -20,6 +20,18 @@ With drawing paused, the Xbox deliberately holds a screen saying to use the PC f
 
 NetBench360 uses the console's existing network route. To measure a USB Ethernet adapter, ensure the console is actually using that adapter rather than native Ethernet or Wi-Fi. It does not select the adapter for you. Stop FTP transfers and other traffic while measuring.
 
+## FTP server (Xbox)
+
+A small built-in FTP server for comparing with Aurora's FTP using the same driver, drive and PC. With the Xbox app stopped, press **LB**. The screen shows the folders and the address; connect an FTP client to that IP on port **21** in **passive mode**, with any user name and password. **B** stops the server.
+
+- `HDD`, `USB0`, `USB1`: the internal drive and USB drives that are present. `APP`: the drive NetBench360 was launched from.
+- `NULL`: uploads are discarded, and downloading `NULL/64MB.bin`, `NULL/256MB.bin` or any `NULL/<n>MB.bin` (1-4096) streams test data. This measures FTP over the network without the drive.
+- The Xbox shows the live rate and the last transfer's average. The client log shows the same in the `226` reply.
+
+Suggested comparison, same file and PC each time: upload to `NULL`, then to `HDD`, then to the USB drive; download `NULL/1024MB.bin`, then a file from `HDD`. Compare with the same transfers through Aurora. `NULL` close to the RAM benchmark means the FTP code is not the limit; `HDD` well below `NULL` points at the drive.
+
+There is **no authentication or encryption**, as with the benchmark listener. Use it only on a trusted LAN and stop it with B when finished. It can delete and overwrite files on the drives it lists.
+
 ## Disk test (Xbox only)
 
 Use it to see whether FTP is limited by the drive rather than the network. With the Xbox app stopped (not listening):
@@ -65,7 +77,7 @@ Tests stop on errors, 15 seconds without socket activity, or a 180-second sessio
 
 ## Scope and recovery
 
-This is an application, not a kernel plugin. It does not patch hooks, modify USB queues, enable AX88179 aggregation, write NAND, edit launch.ini, install itself, or write network test data on Xbox. Only the disk test writes, and only its own temporary file, which it deletes. The project explicitly excludes deployment from builds. Nothing is automatically copied to a console.
+This is an application, not a kernel plugin. It does not patch hooks, modify USB queues, enable AX88179 aggregation, write NAND, edit launch.ini, install itself, or write network test data on Xbox. The disk test writes only its own temporary file, which it deletes. The FTP server writes what an FTP client sends it. The project explicitly excludes deployment from builds. Nothing is automatically copied to a console.
 
 Keep your known-good CUsbEnet XEX and launch.ini backup. Homebrew code and the loaded kernel driver can still crash or hang; zero risk cannot be guaranteed. If the app hangs, stop the PC test and restart the console using your existing recovery procedure. Since this app is launched manually, it is not configured to restart at boot. Stop testing a driver if an integrity failure occurs.
 
