@@ -163,12 +163,16 @@ static void DescribeSettings() {
 static void ChangeSetting(int tab,int row,int step) {
     const int buffers=sizeof(BufferChoices)/sizeof(BufferChoices[0]),targets=sizeof(DiskTargets)/sizeof(DiskTargets[0]),
         blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]);
-    if(tab==nb::TabDisk) {
+    if(tab==nb::TabFtp) { FtpLoginRequired=!FtpLoginRequired; SaveLogin(); }
+    else if(tab==nb::TabDisk) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
-    } else if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
-    else if(tab==nb::TabNetwork && row==1) CpuChoice=(CpuChoice+7+step)%7;
-    else if(tab==nb::TabFtp && row==1) { FtpLoginRequired=!FtpLoginRequired; SaveLogin(); }
-    else DrawDuringTransfers=!DrawDuringTransfers;
+    }
+    // Advanced settings, kept off the everyday tabs.
+    else if(tab==nb::TabSettings) {
+        if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
+        else if(row==1) CpuChoice=(CpuChoice+7+step)%7;
+        else DrawDuringTransfers=!DrawDuringTransfers;
+    }
 }
 static bool IsCancelled(void*) { return InterlockedCompareExchange(&Cancel,0,0)!=0; }
 // Called with StateLock held: combine every running stream into the screen state.
@@ -581,11 +585,13 @@ void __cdecl main() {
         if(!Worker && (pressed&(XINPUT_GAMEPAD_DPAD_UP|XINPUT_GAMEPAD_DPAD_DOWN|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))) {
             EnterCriticalSection(&StateLock);
             const int rows=nb::SettingCount(State.tab);
-            if(pressed&XINPUT_GAMEPAD_DPAD_DOWN) State.focus=(State.focus+1)%rows;
-            if(pressed&XINPUT_GAMEPAD_DPAD_UP) State.focus=(State.focus+rows-1)%rows;
-            if(pressed&XINPUT_GAMEPAD_DPAD_RIGHT) ChangeSetting(State.tab,State.focus,1);
-            if(pressed&XINPUT_GAMEPAD_DPAD_LEFT) ChangeSetting(State.tab,State.focus,-1);
-            DescribeSettings();
+            if(rows) {
+                if(pressed&XINPUT_GAMEPAD_DPAD_DOWN) State.focus=(State.focus+1)%rows;
+                if(pressed&XINPUT_GAMEPAD_DPAD_UP) State.focus=(State.focus+rows-1)%rows;
+                if(pressed&XINPUT_GAMEPAD_DPAD_RIGHT) ChangeSetting(State.tab,State.focus,1);
+                if(pressed&XINPUT_GAMEPAD_DPAD_LEFT) ChangeSetting(State.tab,State.focus,-1);
+                DescribeSettings();
+            }
             LeaveCriticalSection(&StateLock);
         }
         if((pressed&XINPUT_GAMEPAD_BACK) && !Worker) break;

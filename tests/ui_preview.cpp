@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Rasterize the exact Xbox screen for visual review without the Xbox graphics API.
 // Draws Dear ImGui's triangles in software and writes a 1280x720 BMP.
-// Usage: ui-preview out.bmp [idle|run|disk|ftp|ftpon|error]
+// Usage: ui-preview out.bmp [idle|run|disk|ftp|ftpon|error|net|settings]
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <string.h>
@@ -91,6 +91,10 @@ int main(int argc,char** argv) {
     } else if(!strcmp(scene,"error")) {
         state.tab=nb::TabNetwork; state.phase=7; state.focus=1;
         strcpy_s(state.message,"Receive failed during warm-up (10054). Check the cable and press A to listen again.");
+    } else if(!strcmp(scene,"net")) {
+        state.tab=nb::TabNetwork;
+    } else if(!strcmp(scene,"settings")) {
+        state.tab=nb::TabSettings; state.focus=2;
     } else { state.phase=0; state.download=0; }
     ImGui::GetIO().DeltaTime=1.0f/60;
     nb::DrawUi(state);

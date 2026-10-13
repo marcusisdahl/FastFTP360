@@ -45,7 +45,7 @@ You need a console that can run homebrew XEX applications, a working network con
 
 The default user name and password are both `xboxftp`. To choose your own, press **Y** on the FTP server tab while the server is stopped. The Xbox keyboard asks for the user name and then the password: 1 to 23 letters, digits or symbols, no spaces. Cancelling either one leaves the login unchanged.
 
-The **Login** setting on the FTP tab (D-pad) switches the login off, so any user name and password work. Both settings are saved in `FastFTP.ini` next to the XEX, which you can also edit on a PC:
+On the FTP tab, **D-pad Left/Right** switches the login off, so any user name and password work. Both settings are saved in `FastFTP.ini` next to the XEX, which you can also edit on a PC:
 
 ```ini
 login=on
@@ -117,7 +117,7 @@ The companion offers direction, duration, repeat count, **1/2/4 TCP streams**, P
 
 The Xbox send cap applies **per stream**. Four streams at a 16 MiB/s cap have a combined configured ceiling of 64 MiB/s; capped results do not measure maximum bandwidth. With drawing paused, the Xbox deliberately holds a static status screen while the PC shows live progress and the controller remains polled.
 
-While stopped, **D-pad Up/Down** picks a setting on the tab and **Left/Right** changes it: Xbox listener buffers (startup default, 128 KiB, or 256 KiB), the RAM stream workers' hardware thread (automatic or 0–5), and whether the screen keeps drawing during transfers (paused by default). Buffer choices also feed FTP listener/data-socket setup; worker-thread selection is used by the RAM benchmark. Larger buffers may be refused by XNet. These settings are experiments, not promised speed improvements.
+The advanced options are on the **Settings** tab. While stopped, **D-pad Up/Down** picks one and **Left/Right** changes it: Xbox listener buffers (startup default, 128 KiB, or 256 KiB), the RAM stream workers' hardware thread (automatic or 0–5), and whether the screen keeps drawing during transfers (paused by default). Buffer choices also feed FTP listener/data-socket setup; worker-thread selection is used by the RAM benchmark. Larger buffers may be refused by XNet. These settings are experiments, not promised speed improvements.
 
 If more streams improve throughput, connection windowing or per-stream scheduling may contribute. A flat result may indicate a shared limit, but neither outcome alone proves that the driver or USB bus is the bottleneck. Keep every setting consistent between driver comparisons, and remember that the driver label is metadata—it does not select or install a driver.
 

@@ -12,7 +12,8 @@ UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),st
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
     buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
 }
-int SettingCount(int tab) { return tab==TabDisk ? 2 : 3; }
+// The Network tab has none: its tuning lives on the Settings tab.
+int SettingCount(int tab) { static const int rows[]={1,0,2,3}; return tab>=0 && tab<TabCount ? rows[tab] : 0; }
 
 static ImFont* Small; static ImFont* Body; static ImFont* Heading; static ImFont* Hero;
 enum { Left=64, Right=1216, Top=36, Bottom=684 };
@@ -86,6 +87,13 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
         lines[0]="Writes a 256 MiB file, reads it back without the cache";
         lines[1]="and checks every byte. Needs 256 MiB free on the drive.";
         lines[2]="The test file is deleted afterwards.";
+    } else if(s.tab==TabSettings) {
+        title="Settings";
+        static const char* help[3][3]={
+            {"Socket buffers for FTP and the network test.","Bigger is not always faster, and the Xbox may","refuse them. Startup default suits most people."},
+            {"The hardware thread for network test streams.","Automatic suits most people.",NULL},
+            {"Paused holds the screen while data moves.","Live drawing during Xbox sends has crashed the","console before. Keep Paused unless testing it."}};
+        for(int i=0;i<3;++i) lines[i]=help[s.focus>=0 && s.focus<3 ? s.focus : 0][i];
     } else if(s.tab==TabFtp) {
         static const char* names[]={"FTP server","FTP server on","Receiving upload","Sending download"};
         title=names[s.ftpPhase>=0 && s.ftpPhase<4 ? s.ftpPhase : 0];
@@ -135,14 +143,12 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
 // Right card: settings for the selected tab. Locked while something runs.
 static void Settings(const UiState& s,float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
-    Text(Small,x+28,y+24,Hex(Muted),s.busy ? "SETTINGS  (STOP TO CHANGE)" : "SETTINGS");
-    const char* labels[3]; const char* values[3]; int rows=SettingCount(s.tab); char login[56];
+    const char* heading=s.tab==TabFtp ? "LOGIN" : s.tab==TabSettings ? "ADVANCED" : "SETTINGS";
+    char caption[48]; _snprintf_s(caption,sizeof(caption),_TRUNCATE,s.busy ? "%s  (STOP TO CHANGE)" : "%s",heading);
+    Text(Small,x+28,y+24,Hex(Muted),caption);
+    const char* labels[3]; const char* values[3]; int rows=SettingCount(s.tab);
     if(s.tab==TabDisk) { labels[0]="Drive"; values[0]=s.diskTarget; labels[1]="Block size"; values[1]=s.diskBlock; }
-    else if(s.tab==TabFtp) {
-        if(s.ftpUser[0]) _snprintf_s(login,sizeof(login),_TRUNCATE,"%s / %s",s.ftpUser,s.ftpPassword); else strcpy_s(login,"Off, any user");
-        labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Login (user / password)"; values[1]=login;
-        labels[2]="Drawing during transfers"; values[2]=s.drawing;
-    }
+    else if(s.tab==TabFtp) { labels[0]="Login"; values[0]=s.ftpUser[0] ? "On" : "Off, any user name and password"; }
     else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing; }
     // Rows close up a little on the shorter FTP card.
     const float pitch=h<280 ? 60.0f : 70.0f;
@@ -157,6 +163,31 @@ static void Settings(const UiState& s,float x,float y,float w,float h) {
             TextRight(Heading,x+w-36-Width(Heading,">")-14,top+pitch/2-20,Hex(Green),"<");
         }
     }
+    // The FTP card also shows what to type into the FTP client.
+    if(s.tab==TabFtp && s.ftpUser[0]) {
+        float top=y+56+pitch+8;
+        Text(Small,x+36,top,Hex(Muted),"User name"); Text(Body,x+150,top-3,Hex(White),s.ftpUser);
+        Text(Small,x+36,top+34,Hex(Muted),"Password"); Text(Body,x+150,top+31,Hex(White),s.ftpPassword);
+        Text(Small,x+36,top+72,Hex(Dim),s.busy ? "Stop the server to change them." : "Y changes them.");
+    }
+}
+// Right card on the Network tab, which has no settings of its own.
+static void PcApp(const UiState& s,float x,float y,float w,float h) {
+    Box(x,y,w,h,Hex(Card),14);
+    Text(Small,x+28,y+24,Hex(Muted),"ON THE PC");
+    Text(Body,x+28,y+62,Hex(White),"NetBench360-PC.exe");
+    Text(Small,x+28,y+104,Hex(Muted),"Xbox IP to enter");
+    Text(Heading,x+28,y+130,Hex(White),s.ip);
+    Text(Small,x+28,y+h-46,Hex(Dim),"Tuning is on the Settings tab.");
+}
+// Bottom card on the Settings tab: where the app keeps its files.
+static void Files(float x,float y,float w,float h) {
+    Box(x,y,w,h,Hex(Card),14);
+    Text(Small,x+28,y+18,Hex(Muted),"FILES NEXT TO THE XEX");
+    Text(Body,x+28,y+52,Hex(White),"FastFTP.ini");
+    Text(Body,x+200,y+52,Hex(Muted),"FTP login");
+    Text(Body,x+460,y+52,Hex(White),"FastFTP.log");
+    Text(Body,x+640,y+52,Hex(Muted),"FTP activity");
 }
 
 // Bottom card: the latest completed results for the selected tab.
@@ -205,15 +236,16 @@ static void Transfers(const UiState& s,float x,float y,float w,float h) {
 static void Footer(const UiState& s,float y) {
     Box(Left,y,Right-Left,2,Hex(Card));
     float x=Left; y+=18;
-    if(s.busy) x=Button(x,y,"B",ButtonB,s.tab==TabFtp ? "Stop server" : "Stop");
-    else if(s.keyboard) Text(Body,x,y+1,Hex(Muted),"Type the FTP user name, then the password.");
-    else {
-        static const char* start[]={"Start FTP server","Listen","Run disk test"};
-        x=Button(x,y,"A",ButtonA,start[s.tab]);
-        if(s.tab==TabFtp) x=Button(x,y,"Y",ButtonY,"Set login");
-        x=Button(x,y,"D-pad",0,"Settings");
-        x=Button(x,y,"Back",0,"Exit");
+    if(s.busy) {
+        x=Button(x,y,"B",ButtonB,s.tab==TabFtp ? "Stop server" : "Stop");
+        return;
     }
+    if(s.keyboard) { Text(Body,x,y+1,Hex(Muted),"Type the FTP user name, then the password."); return; }
+    static const char* start[]={"Start FTP server","Listen","Run disk test",NULL};
+    if(start[s.tab]) x=Button(x,y,"A",ButtonA,start[s.tab]);
+    if(s.tab==TabFtp) { x=Button(x,y,"Y",ButtonY,"Set login"); x=Button(x,y,"D-pad",0,"Login on/off"); }
+    else if(SettingCount(s.tab)) x=Button(x,y,"D-pad",0,"Change settings");
+    x=Button(x,y,"Back",0,"Exit");
 }
 
 void DrawUi(const UiState& s) {
@@ -230,12 +262,12 @@ void DrawUi(const UiState& s) {
     Text(Small,Left+20+Width(Heading,"NetBench360")+16,Top+14,Hex(Muted),"Network, disk and FTP diagnostics  v0.4.0");
     bool online=strchr(s.ip,'.')!=NULL;
     TextRight(Heading,Right,Top,Hex(online ? White : Muted),s.ip);
-    _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  port %d",online ? "Xbox IP" : "No address yet",s.tab==TabFtp ? 21 : 36020);
+    _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  port %d",online ? "Xbox IP" : "No address yet",s.tab==TabNetwork ? 36020 : 21);
     TextRight(Small,Right,Top+46,Hex(Muted),text);
     List->AddCircleFilled(ImVec2(Right-Width(Small,text)-14,Top+57),5,Hex(online ? Green : ButtonY),12);
 
     // Tabs, switched with the bumpers while nothing runs.
-    static const char* tabs[]={"FTP server","Network","Disk"};
+    static const char* tabs[]={"FTP server","Network","Disk","Settings"};
     float x=Left,y=118;
     if(!s.busy) { Box(x,y+6,40,30,Hex(Raised),8); Text(Small,x+8,y+9,Hex(White),"LB"); x+=52; }
     for(int i=0;i<TabCount;++i) {
@@ -253,8 +285,8 @@ void DrawUi(const UiState& s) {
         Transfers(s,Left,440,Right-Left,176);
     } else {
         Status(s,Left,184,744,280);
-        Settings(s,Left+764,184,Right-Left-764,280);
-        Results(s,Left,484,Right-Left,110);
+        if(s.tab==TabNetwork) PcApp(s,Left+764,184,Right-Left-764,280); else Settings(s,Left+764,184,Right-Left-764,280);
+        if(s.tab==TabSettings) Files(Left,484,Right-Left,110); else Results(s,Left,484,Right-Left,110);
     }
 
     Footer(s,628);

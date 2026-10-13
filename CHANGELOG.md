@@ -4,6 +4,7 @@
 
 - **Your own FTP login**: press **Y** on the FTP server tab to type a user name and password with the Xbox keyboard (1-23 characters, no spaces). The login and the Login on/off setting are saved in `FastFTP.ini` next to the XEX, which can also be edited on a PC. Without the file the login is `xboxftp` / `xboxftp`. Four new checks in `tests/ftp.py`.
 - The app opens on the **FTP server** tab, now the first tab.
+- New **Settings** tab for the advanced options: Xbox socket buffers, worker CPU and drawing during transfers. The FTP tab keeps only the login (on/off, user name and password shown for the FTP client); the Network tab shows what to enter in the PC app; the Disk tab keeps drive and block size.
 - **Last 5 transfers** on the FTP tab: direction, file name, size and speed (or Failed), newest first.
 - **Log file** `FastFTP.log` next to the XEX, one dated line per event: server start (address, login, folders) and stop, each client's connect, login (or wrong login), uploads and downloads with path, bytes, seconds and MiB/s, deletes, renames, new folders and disconnect. A log over 1 MiB moves to `FastFTP.old.log` when the server starts. One new check in `tests/ftp.py`.
 - The Xbox screen is drawn with **Dear ImGui 1.86** (the last release that supports the VS2010-era Xbox compiler) and an embedded Roboto font, replacing the 5x7 bitmap font.

@@ -2,7 +2,7 @@
 #pragma once
 namespace nb {
 // FTP server first: it is the tab the app opens on.
-enum UiTab { TabFtp, TabNetwork, TabDisk, TabCount };
+enum UiTab { TabFtp, TabNetwork, TabDisk, TabSettings, TabCount };
 // One finished FTP transfer for the "last transfers" list.
 struct UiTransfer { char name[64]; double mebibytes,rate; int upload,ok; };
 enum { UiRecentTransfers = 5 };
