@@ -9,7 +9,7 @@ struct UiState {
     // FTP login; an empty user means any user name and password.
     char ftpUser[24],ftpPassword[24];
     int phase,direction,duration,armed,completed,streams,rateLimit,options,downloadLimit,diskPhase,ftpPhase;
-    int tab,focus,busy;
+    int tab,focus,busy,keyboard;
     double elapsed,rate,upload,download,mebibytes,diskTotal;
     UiState();
 };

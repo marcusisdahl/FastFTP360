@@ -173,4 +173,25 @@ with tempfile.TemporaryDirectory() as temp:
         ftp.quit()
         host.communicate(timeout=10)
 
+    with server(served, sessions=1, credentials=("marcus", "S3cret!=#")) as (port, host):
+        ftp = ftplib.FTP()
+        ftp.connect("127.0.0.1", port, timeout=20)
+        ftp.login("marcus", "S3cret!=#")
+        check("a user-chosen name and password log in", ftp.pwd() == "/")
+        ftp.quit()
+        host.communicate(timeout=10)
+
+    def login_file(text):
+        path = Path(temp) / "FastFTP.ini"
+        path.write_bytes(text.encode("latin-1"))
+        out = subprocess.run([str(ROOT / "build/host/ftp-host.exe"), "--login-file", str(path)],
+                             capture_output=True, text=True, timeout=10).stdout.split()
+        return out[1:]
+
+    check("no settings file keeps xboxftp/xboxftp", login_file("") == ["on", "xboxftp", "xboxftp", "roundtrip"])
+    check("the settings file sets user, password and login",
+          login_file("login=off\r\nuser=marcus\r\npassword=S3cret!=#\r\n") == ["off", "marcus", "S3cret!=#", "roundtrip"])
+    check("invalid settings are ignored",
+          login_file("user=has space\npassword=\nlogin=maybe\nuser=" + "x" * 24 + "\n") == ["on", "xboxftp", "xboxftp", "roundtrip"])
+
 print("%d FTP checks passed. Console execution remains untested." % passed)

@@ -8,7 +8,7 @@
 #include <string.h>
 namespace nb {
 UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),
-    tab(0),focus(0),busy(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
+    tab(0),focus(0),busy(0),keyboard(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
     buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
 }
@@ -177,9 +177,11 @@ static void Footer(const UiState& s,float y) {
     Box(Left,y,Right-Left,2,Hex(Card));
     float x=Left; y+=18;
     if(s.busy) x=Button(x,y,"B",ButtonB,s.tab==TabFtp ? "Stop server" : "Stop");
+    else if(s.keyboard) Text(Body,x,y+1,Hex(Muted),"Type the FTP user name, then the password.");
     else {
         static const char* start[]={"Listen","Run disk test","Start FTP server"};
         x=Button(x,y,"A",ButtonA,start[s.tab]);
+        if(s.tab==TabFtp) x=Button(x,y,"Y",ButtonY,"Set login");
         x=Button(x,y,"D-pad",0,"Settings");
         x=Button(x,y,"Back",0,"Exit");
     }
@@ -196,7 +198,7 @@ void DrawUi(const UiState& s) {
     // Header: name and version, then the address to type into the PC app.
     Box(Left,Top+6,6,40,Hex(Green),3);
     Text(Heading,Left+20,Top,Hex(White),"NetBench360");
-    Text(Small,Left+20+Width(Heading,"NetBench360")+16,Top+14,Hex(Muted),"Network, disk and FTP diagnostics  v0.3.0");
+    Text(Small,Left+20+Width(Heading,"NetBench360")+16,Top+14,Hex(Muted),"Network, disk and FTP diagnostics  v0.4.0");
     bool online=strchr(s.ip,'.')!=NULL;
     TextRight(Heading,Right,Top,Hex(online ? White : Muted),s.ip);
     _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  port %d",online ? "Xbox IP" : "No address yet",s.tab==TabFtp ? 21 : 36020);

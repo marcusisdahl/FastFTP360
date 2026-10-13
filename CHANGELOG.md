@@ -1,7 +1,8 @@
 # Changes
 
-## Unreleased: Dear ImGui screen (prototype)
+## 0.4.0
 
+- **Your own FTP login**: press **Y** on the FTP server tab to type a user name and password with the Xbox keyboard (1-23 characters, no spaces). The login and the Login on/off setting are saved in `FastFTP.ini` next to the XEX, which can also be edited on a PC. Without the file the login is `xboxftp` / `xboxftp`. Four new checks in `tests/ftp.py`.
 - The Xbox screen is drawn with **Dear ImGui 1.86** (the last release that supports the VS2010-era Xbox compiler) and an embedded Roboto font, replacing the 5x7 bitmap font.
 - **Tabs** for Network, Disk and FTP server, switched with **LB**/**RB** while stopped. Each tab shows its own live rate, progress and last result. **A** starts the tab's action, **B** stops, **Back** exits.
 - A **settings panel** per tab: D-pad Up/Down picks a setting, Left/Right changes it. Settings are locked while something runs.
@@ -12,7 +13,7 @@
 - `xbox/imgui_impl_xbox360.cpp` renders ImGui with a shader pair, since the stock DX9 backend needs fixed-function D3D that the 360 lacks.
 - `tests/ui_preview.cpp` rasterizes the ImGui output in software, so the screen can still be checked without a console.
 
-Not yet built with the Xbox SDK or run on a console.
+The Dear ImGui screen, Aurora-style folders and fixed xboxftp login have run on a console. The user-set login is built and host-tested only.
 
 ## 0.3.0
 

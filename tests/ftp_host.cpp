@@ -1,15 +1,29 @@
 // SPDX-License-Identifier: MIT
 // Runs the SAME FTP server source on Windows loopback for protocol tests.
 // Usage: ftp-host <port> <folder served as /HDD> <sessions> [user password]
+//        ftp-host --login-file <path>   prints the login the Xbox would read from it
 #include "../shared/ftp.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 static double Started;
 static bool Cancelled(void*) { return nb::Now()-Started>120; }
 static void Progress(void*,const char* operation,const char* file,nb::U64 bytes,double seconds,bool done,bool ok) {
     if(done) { printf("%s %s %s bytes=%I64u seconds=%.3f\n",ok ? "DONE" : "FAILED",operation,file,bytes,seconds); fflush(stdout); }
 }
 int main(int argc,char** argv) {
+    if(argc==3 && !strcmp(argv[1],"--login-file")) {
+        char text[512]={0}; FILE* file=NULL;
+        if(fopen_s(&file,argv[2],"rb")==0) { text[fread(text,1,sizeof(text)-1,file)]=0; fclose(file); }
+        bool required=true; char user[nb::FtpLoginMax+1]="xboxftp",password[nb::FtpLoginMax+1]="xboxftp";
+        nb::ParseFtpLogin(text,required,user,password);
+        char saved[160]; nb::FormatFtpLogin(saved,sizeof(saved),required,user,password);
+        bool same=true; char user2[nb::FtpLoginMax+1]="x",password2[nb::FtpLoginMax+1]="x"; bool required2=!required;
+        nb::ParseFtpLogin(saved,required2,user2,password2);
+        same=required2==required && !strcmp(user2,user) && !strcmp(password2,password);
+        printf("LOGIN %s %s %s %s\n",required ? "on" : "off",user,password,same ? "roundtrip" : "mismatch");
+        return 0;
+    }
     if(argc<4) return 1;
     WSADATA wsa; if(WSAStartup(MAKEWORD(2,2),&wsa)) return 1;
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);

@@ -28,8 +28,17 @@ static int CpuChoice=0;
 // Xbox sends has preceded console crashes, so the screen is held instead.
 static bool DrawDuringTransfers=false;
 // FTP login. Required by default; switching it off lets any user name in.
+// The user can change both with the on-screen keyboard (Y on the FTP tab);
+// they are kept in FastFTP.ini next to the XEX.
 static bool FtpLoginRequired=true;
-static const char FtpUser[]="xboxftp",FtpPassword[]="xboxftp";
+static char FtpUser[nb::FtpLoginMax+1]="xboxftp",FtpPassword[nb::FtpLoginMax+1]="xboxftp";
+static const char LoginFile[]="game:\\FastFTP.ini";
+// On-screen keyboard: 0 closed, 1 asking for the user name, 2 for the password.
+static int KeyboardStep=0;
+static DWORD KeyboardPad=0;
+static XOVERLAPPED KeyboardOverlapped;
+static WCHAR KeyboardText[nb::FtpLoginMax+2];
+static char PendingUser[nb::FtpLoginMax+1];
 
 // Disk test targets. The app's own drive needs no mount; the others are linked
 // to their kernel device for the test and unlinked afterwards.
@@ -79,6 +88,22 @@ static int CompareRoots(const void* a,const void* b) {
     return _stricmp(static_cast<const nb::FtpRoot*>(a)->name,static_cast<const nb::FtpRoot*>(b)->name);
 }
 
+static void LoadLogin() {
+    HANDLE file=CreateFile(LoginFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file==INVALID_HANDLE_VALUE) return;
+    char text[512]; DWORD read=0;
+    if(ReadFile(file,text,sizeof(text)-1,&read,NULL)) { text[read]=0; nb::ParseFtpLogin(text,FtpLoginRequired,FtpUser,FtpPassword); }
+    CloseHandle(file);
+}
+static bool SaveLogin() {
+    char text[160]; nb::FormatFtpLogin(text,sizeof(text),FtpLoginRequired,FtpUser,FtpPassword);
+    HANDLE file=CreateFile(LoginFile,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file==INVALID_HANDLE_VALUE) return false;
+    DWORD written=0; bool ok=WriteFile(file,text,DWORD(strlen(text)),&written,NULL) && written==strlen(text);
+    CloseHandle(file);
+    return ok;
+}
+
 struct Stream {
     HANDLE thread;
     SOCKET socket;
@@ -114,7 +139,7 @@ static void ChangeSetting(int tab,int row,int step) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
     } else if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
     else if(tab==nb::TabNetwork && row==1) CpuChoice=(CpuChoice+7+step)%7;
-    else if(tab==nb::TabFtp && row==1) FtpLoginRequired=!FtpLoginRequired;
+    else if(tab==nb::TabFtp && row==1) { FtpLoginRequired=!FtpLoginRequired; SaveLogin(); }
     else DrawDuringTransfers=!DrawDuringTransfers;
 }
 static bool IsCancelled(void*) { return InterlockedCompareExchange(&Cancel,0,0)!=0; }
@@ -398,6 +423,38 @@ static DWORD WINAPI ServerThread(void*) {
     LeaveCriticalSection(&StateLock);
     return 0;
 }
+static bool OpenKeyboard(DWORD pad,int step,const char* current) {
+    WCHAR initial[nb::FtpLoginMax+1];
+    for(int i=0;;++i) { initial[i]=WCHAR(current[i]); if(!current[i]) break; }
+    memset(&KeyboardOverlapped,0,sizeof(KeyboardOverlapped)); KeyboardText[0]=0;
+    DWORD result=XShowKeyboardUI(pad,VKBD_DEFAULT,initial,step==1 ? L"FTP user name" : L"FTP password",
+        L"Up to 23 characters: letters, digits and symbols, no spaces.",KeyboardText,nb::FtpLoginMax+2,&KeyboardOverlapped);
+    if(result!=ERROR_IO_PENDING && result!=ERROR_SUCCESS) return false;
+    KeyboardStep=step; KeyboardPad=pad; return true;
+}
+static void LoginMessage(const char* text) {
+    EnterCriticalSection(&StateLock); State.phase=nb::Idle; strcpy_s(State.message,text); LeaveCriticalSection(&StateLock);
+}
+// Called every frame while the keyboard is open: user name first, then password.
+static void PollKeyboard() {
+    if(!KeyboardStep || !XHasOverlappedIoCompleted(&KeyboardOverlapped)) return;
+    const int step=KeyboardStep; KeyboardStep=0;
+    if(XGetOverlappedResult(&KeyboardOverlapped,NULL,FALSE)!=ERROR_SUCCESS) { LoginMessage("Login unchanged."); return; }
+    char text[nb::FtpLoginMax+2]; int i=0;
+    for(;KeyboardText[i] && i<nb::FtpLoginMax+1;++i) text[i]=KeyboardText[i]<0x80 ? char(KeyboardText[i]) : '\x01';
+    text[i]=0;
+    if(!nb::ValidFtpLogin(text)) { LoginMessage("Login unchanged: use 1-23 letters, digits or symbols, no spaces."); return; }
+    if(step==1) {
+        strcpy_s(PendingUser,text);
+        if(!OpenKeyboard(KeyboardPad,2,FtpPassword)) LoginMessage("Could not open the keyboard. Login unchanged.");
+        return;
+    }
+    EnterCriticalSection(&StateLock);
+    strcpy_s(FtpUser,PendingUser); strcpy_s(FtpPassword,text); FtpLoginRequired=true; DescribeSettings();
+    LeaveCriticalSection(&StateLock);
+    LoginMessage(SaveLogin() ? "Login changed and saved in FastFTP.ini." : "Login changed, but FastFTP.ini could not be saved.");
+}
+
 static bool InitGraphics() {
     IDirect3D9* d3d=Direct3DCreate9(D3D_SDK_VERSION);
     if(!d3d) return false;
@@ -419,6 +476,7 @@ static void Render(const nb::UiState& state,float seconds) {
 void __cdecl main() {
     InitializeCriticalSection(&StateLock);
     for(int i=0;i<nb::MaxStreams;++i) { Streams[i].thread=NULL; Streams[i].socket=INVALID_SOCKET; }
+    LoadLogin();
     DescribeSettings();
     nb::InitUi();
     if(!InitGraphics()) XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);
@@ -439,9 +497,18 @@ void __cdecl main() {
             else strcpy_s(State.ip,"Waiting for network");
             LeaveCriticalSection(&StateLock); lastAddress=nb::Now();
         }
-        WORD buttons=0;
-        for(DWORD pad=0;pad<4;++pad) { XINPUT_STATE input={0}; if(XInputGetState(pad,&input)==ERROR_SUCCESS) buttons|=input.Gamepad.wButtons; }
+        WORD buttons=0; DWORD keyboardPad=0;
+        for(DWORD pad=0;pad<4;++pad) {
+            XINPUT_STATE input={0};
+            if(XInputGetState(pad,&input)!=ERROR_SUCCESS) continue;
+            if(input.Gamepad.wButtons & ~previous & XINPUT_GAMEPAD_Y) keyboardPad=pad;
+            buttons|=input.Gamepad.wButtons;
+        }
         WORD pressed=buttons & ~previous; previous=buttons;
+        // The keyboard takes the controller while it is open.
+        if(KeyboardStep) { PollKeyboard(); pressed=0; }
+        if((pressed&XINPUT_GAMEPAD_Y) && !Worker && State.tab==nb::TabFtp &&
+            !OpenKeyboard(keyboardPad,1,FtpUser)) LoginMessage("Could not open the keyboard.");
         // A starts whatever the current tab is for; B stops it.
         if((pressed&XINPUT_GAMEPAD_A) && !Worker && State.tab==nb::TabNetwork && NetworkReady) {
             InterlockedExchange(&Cancel,0);
@@ -482,7 +549,7 @@ void __cdecl main() {
         }
         if((pressed&XINPUT_GAMEPAD_BACK) && !Worker) break;
         EnterCriticalSection(&StateLock); nb::UiState snapshot=State; LeaveCriticalSection(&StateLock);
-        snapshot.busy=Worker!=NULL;
+        snapshot.busy=Worker!=NULL; snapshot.keyboard=KeyboardStep!=0;
         const double now=nb::Now(); const float seconds=float(now-lastFrame); lastFrame=now;
         // Hold one static frame while data moves if the PC asked for it, or
         // unless drawing during transfers is switched on.

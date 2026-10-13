@@ -4,16 +4,15 @@
 
 FastFTP transfers files between a PC and the Xbox's internal or USB storage using a regular FTP client. Its transfer engine overlaps disk reads/writes with network traffic through two alternating 1 MiB buffers, and sends data in smaller pieces with explicit thread yields. The aim is to reduce time spent waiting between disk and network operations.
 
-The application also includes a RAM network benchmark, a local disk test, and a virtual `NULL` folder for testing FTP without a disk. Together, these help investigate whether a transfer is limited by the FTP application, storage, network stack, driver, or connection.
+The application also includes a RAM network benchmark and a local disk test. Together, these help investigate whether a transfer is limited by the FTP application, storage, network stack, driver, or connection.
 
-The project grew from **NetBench360**. The current source still uses that name in executable filenames, the Visual Studio solution, and parts of the interface. The Xbox UI identifies the FTP additions as **v0.3.0**; the Windows benchmark companion still displays **v0.2.0** and uses the matching benchmark protocol v3.
+The project grew from **NetBench360**. The current source still uses that name in executable filenames, the Visual Studio solution, and parts of the interface. The Xbox screen shows **v0.4.0**; the Windows benchmark companion still displays **v0.2.0** and uses the matching benchmark protocol v3.
 
 ## What is included
 
 | Component | Purpose | What runs on the PC |
 |---|---|---|
 | Xbox FTP server | Upload, download, browse, rename, and manage files on exposed drives | A regular FTP client, such as FileZilla |
-| FTP `NULL` folder | Measure FTP transfer speed without reading or writing a drive | The same FTP client |
 | RAM network benchmark | Test TCP throughput in either direction, with optional data verification and parallel streams | `NetBench360-PC.exe` |
 | Local disk test | Measure and verify a temporary file on the selected Xbox drive | No PC application needed |
 
@@ -25,7 +24,7 @@ You need a console that can run homebrew XEX applications, a working network con
 
 1. Obtain a build of `NetBench360.xex`, or [build it from this source](#build-from-source). Copy it into its own application folder, for example `Hdd1:\Apps\FastFTP\`.
 2. Launch the XEX through Aurora, XeXMenu, or your usual homebrew launcher. Keep it running while transferring files. **Do not add this application to launch.ini as a plugin.**
-3. With other tests stopped, press **LB** to start the FTP server. Read the IP address shown on the Xbox screen.
+3. Switch to the **FTP server** tab with **LB**/**RB** and press **A**. Read the IP address shown on the Xbox screen.
 4. Connect your FTP client with these settings:
 
    | Setting | Value |
@@ -35,23 +34,40 @@ You need a console that can run homebrew XEX applications, a working network con
    | Port | `21` |
    | Encryption | Plain FTP; TLS/FTPS is not implemented |
    | Transfer mode | Passive (`PASV` or `EPSV`) |
-   | Username / password | Any values, for example `xbox` / `xbox`; these are not access protection |
+   | Username / password | `xboxftp` / `xboxftp`, unless you changed them (see [Login](#login)) |
 
 5. Start with one simultaneous transfer and a disposable file in a new folder. Choose the appropriate drive folder from the table below.
 6. Press **B** to stop the FTP server. Once stopped, **Back** exits to the dashboard.
 
-**Access:** the server accepts any credentials and has no encryption. Connected clients can overwrite and delete real files. Use a trusted LAN, keep backups of important files, and do not expose it to the internet.
+**Access:** the login is sent unencrypted, and nothing else is encrypted either. Connected clients can overwrite and delete real files. Use a trusted LAN, keep backups of important files, and do not expose it to the internet.
+
+### Login
+
+The default user name and password are both `xboxftp`. To choose your own, press **Y** on the FTP server tab while the server is stopped. The Xbox keyboard asks for the user name and then the password: 1 to 23 letters, digits or symbols, no spaces. Cancelling either one leaves the login unchanged.
+
+The **Login** setting on the FTP tab (D-pad) switches the login off, so any user name and password work. Both settings are saved in `FastFTP.ini` next to the XEX, which you can also edit on a PC:
+
+```ini
+login=on
+user=xboxftp
+password=xboxftp
+```
+
+Lines that are missing or invalid keep the defaults.
 
 ### Folders exposed over FTP
 
+The top level lists the drives the way Aurora's FTP does, sorted by name, so paths such as `/Hdd1/Content/...` are the same in both servers:
+
 | FTP path | Contents |
 |---|---|
-| `/HDD/` | The internal HDD content partition, when readable |
-| `/USB0/`, `/USB1/` | USB storage devices that the Xbox runtime can mount and read |
-| `/APP/` | The application's `game:` location—the directory tree exposed for the running XEX |
-| `/NULL/` | A virtual destination/source for network-only FTP tests |
+| `/Game/` | The drive and folder the XEX was launched from |
+| `/Hdd1/` | The internal HDD content partition |
+| `/HddX/`, `/SysExt/`, `/System/` | Internal HDD system partitions |
+| `/Usb0/`-`/Usb2/` | USB storage devices |
+| `/USBMU0/`-`/USBMU2/`, `/USBMUCache0/`-`/USBMUCache2/` | USB sticks formatted by the Xbox |
 
-HDD and USB folders appear only when accessible. File naming, size, and filesystem limits still depend on the selected storage device and Xbox runtime. The application creates temporary drive links while serving FTP and removes them when the server stops.
+Only drives that are present and readable are listed. File naming, size, and filesystem limits still depend on the storage device and Xbox runtime. The application creates temporary drive links while serving FTP and removes them when the server stops.
 
 ### FTP support and limitations
 
@@ -77,29 +93,25 @@ The Xbox screen shows live transfer progress and the last completed transfer's a
 
 ## Measure where time is spent
 
-### FTP without storage: `/NULL/`
+### FTP compared with the RAM benchmark and disk test
 
-- Upload a file to `/NULL/`: the server receives and discards its bytes. No file is stored.
-- Download `/NULL/256MB.bin` or `/NULL/1024MB.bin`: the server generates a repeating test pattern in memory.
-- Generated names follow `<n>MB.bin`, where `n` is **1–4096**. Despite the `MB` name, each unit represents **1 MiB** (1,048,576 bytes).
-
-Compare the same direction and transfer size using `/NULL/`, then a real drive, and then another FTP server such as Aurora. A lower real-file rate suggests storage or the file-I/O path contributes to the difference. A similar rate suggests looking further along the network/application path. These comparisons narrow possibilities; they do not identify a single cause by themselves. Downloads can benefit from file caching, so repeat tests consistently.
+Compare the same direction and transfer size with the RAM benchmark (network only), the disk test (drive only), a real FTP transfer, and another FTP server such as Aurora. A real-file rate well below the RAM benchmark suggests storage or the file-I/O path contributes. These comparisons narrow possibilities; they do not identify a single cause by themselves. Downloads can benefit from file caching, so repeat tests consistently.
 
 ### RAM network benchmark
 
-Press **A** while stopped to listen on TCP **36020**, then run `NetBench360-PC.exe` on the PC. This uses a custom benchmark protocol, separate from FTP; the Windows app and Xbox benchmark must both support **protocol v3**.
+On the **Network** tab, press **A** to listen on TCP **36020**, then run `NetBench360-PC.exe` on the PC. This uses a custom benchmark protocol, separate from FTP; the Windows app and Xbox benchmark must both support **protocol v3**.
 
 The companion offers direction, duration, repeat count, **1/2/4 TCP streams**, PC socket buffers, Xbox send limit, and data-check settings. Each stream checks 1 MiB of known data, warms up with 32 MiB, then runs the timed transfer. Final rates are receiver-reported. **All data** additionally verifies timed payload bytes and costs receiver CPU; the default check covers the initial 1 MiB only. CSV preserves the settings and completed results.
 
 The Xbox send cap applies **per stream**. Four streams at a 16 MiB/s cap have a combined configured ceiling of 64 MiB/s; capped results do not measure maximum bandwidth. With drawing paused, the Xbox deliberately holds a static status screen while the PC shows live progress and the controller remains polled.
 
-While stopped, **D-pad Up/Down** selects Xbox listener buffers (startup default, 128 KiB, or 256 KiB); **Left/Right** selects the RAM stream workers' hardware thread (automatic or 0–5). Buffer choices also feed FTP listener/data-socket setup; worker-thread selection is used by the RAM benchmark. Larger buffers may be refused by XNet. These settings are experiments, not promised speed improvements.
+While stopped, **D-pad Up/Down** picks a setting on the tab and **Left/Right** changes it: Xbox listener buffers (startup default, 128 KiB, or 256 KiB), the RAM stream workers' hardware thread (automatic or 0–5), and whether the screen keeps drawing during transfers (paused by default). Buffer choices also feed FTP listener/data-socket setup; worker-thread selection is used by the RAM benchmark. Larger buffers may be refused by XNet. These settings are experiments, not promised speed improvements.
 
 If more streams improve throughput, connection windowing or per-stream scheduling may contribute. A flat result may indicate a shared limit, but neither outcome alone proves that the driver or USB bus is the bottleneck. Keep every setting consistent between driver comparisons, and remember that the driver label is metadata—it does not select or install a driver.
 
 ### Local disk test
 
-With all modes stopped, **Y** selects the app location, HDD, USB0, or USB1; **RB** selects a 64 KiB, 256 KiB, or 1 MiB block size; **X** starts the test.
+On the **Disk** tab, the D-pad picks the drive (app location, HDD, USB0, or USB1) and the block size (64 KiB, 256 KiB, or 1 MiB); **A** starts the test.
 
 It writes a **256 MiB** file named `NETBENCH360-DISKTEST.TMP`, includes the final flush in write timing, reads it back without the file cache, compares the data, and attempts to delete it afterward. **B** requests cancellation. Use a writable target with more than 256 MiB free, and do not keep an existing file with that test filename in the selected root: the test recreates it. A crash or interrupted cleanup can leave the temporary file behind.
 
@@ -107,7 +119,7 @@ The disk test measures a separate workload from FTP. Similar results can suggest
 
 ## Performance and development status
 
-FastFTP is an experimental application. The current source includes the **v0.3.0 FTP additions**; this repository currently has no packaged GitHub release. The changelog records 21 host FTP checks covering file operations, exact upload/download bytes, path handling, virtual transfers, and three simultaneous sessions. That is host-test evidence, not console certification. The latest recorded status says the FTP and disk additions still need console validation; see [validation notes](docs/VALIDATION.md) and [change history](CHANGELOG.md).
+FastFTP is an experimental application. Releases are on the [Releases page](https://github.com/marcusisdahl/Xbox360-FastFTP/releases). Host tests run the same FTP server source on Windows loopback with Python's `ftplib`: file operations, exact upload/download bytes, path handling, the login, the `FastFTP.ini` settings file, and three simultaneous sessions. That is host-test evidence, not console certification. On a console, uploads have reached about 27.5 MiB/s with a TP-Link UE306 adapter; see [validation notes](docs/VALIDATION.md) and [change history](CHANGELOG.md).
 
 Throughput depends on direction, file sizes, the FTP client, console storage, network stack, loaded driver, connection, and settings. The name does not guarantee a particular speed or improvement over another server. A RAM benchmark result is not a real-file transfer result.
 

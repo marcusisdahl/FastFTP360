@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Minimal passive-mode FTP server for throughput tests. Any user name and
-// password is accepted, so it must only be armed on a trusted LAN.
+// Minimal passive-mode FTP server for throughput tests. The optional login is
+// sent unencrypted, so it must only be armed on a trusted LAN.
 #include "ftp.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -551,5 +551,32 @@ bool ServeFtp(SOCKET listener,const FtpRoot* roots,int rootCount,DWORD address,i
     // Sessions poll the same cancel flag; wait so no socket outlives the server.
     for(int i=0;i<started;++i) { WaitForSingleObject(threads[i],INFINITE); CloseHandle(threads[i]); }
     return ok;
+}
+
+bool ValidFtpLogin(const char* text) {
+    size_t length=strlen(text);
+    if(!length || length>FtpLoginMax) return false;
+    for(size_t i=0;i<length;++i) if(text[i]<0x21 || text[i]>0x7E) return false;
+    return true;
+}
+void ParseFtpLogin(const char* text, bool& required, char* user, char* password) {
+    while(*text) {
+        const char* end=text; while(*end && *end!='\n' && *end!='\r') ++end;
+        char line[96]; size_t length=size_t(end-text);
+        if(length<sizeof(line)) {
+            memcpy(line,text,length); line[length]=0;
+            char* value=strchr(line,'=');
+            if(value) {
+                *value++=0;
+                if(!_stricmp(line,"login")) { if(!_stricmp(value,"on")) required=true; else if(!_stricmp(value,"off")) required=false; }
+                else if(!_stricmp(line,"user") && ValidFtpLogin(value)) strcpy_s(user,FtpLoginMax+1,value);
+                else if(!_stricmp(line,"password") && ValidFtpLogin(value)) strcpy_s(password,FtpLoginMax+1,value);
+            }
+        }
+        text=end; while(*text=='\n' || *text=='\r') ++text;
+    }
+}
+void FormatFtpLogin(char* out, size_t capacity, bool required, const char* user, const char* password) {
+    _snprintf_s(out,capacity,_TRUNCATE,"login=%s\r\nuser=%s\r\npassword=%s\r\n",required ? "on" : "off",user,password);
 }
 }
