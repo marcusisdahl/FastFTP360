@@ -1,5 +1,9 @@
 # Changes
 
+## 0.4.1
+
+The first published release of the 0.4 work. The 0.4.0 tag pointed at an earlier commit, from before the rename to FastFTP and the new README, so 0.4.1 replaces it. Apart from the version number, the code is the same as the 0.4.0 files.
+
 ## 0.4.0
 
 - **Your own FTP login**: press **Y** on the FTP server tab to type a user name and password with the Xbox keyboard (1-23 characters, no spaces). The login and the Login on/off setting are saved in `FastFTP.ini` next to the XEX, which can also be edited on a PC. Without the file the login is `xboxftp` / `xboxftp`. Four new checks in `tests/ftp.py`.
