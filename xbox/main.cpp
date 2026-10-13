@@ -56,10 +56,13 @@ static void UnlinkDrive(const char* name) {
     KernelString link={USHORT(strlen(nameText)),USHORT(sizeof(nameText)),nameText};
     ObDeleteSymbolicLink(&link);
 }
-// FTP folders backed by drives. A drive is listed only if its root can be read.
+// FTP folders backed by drives, named as Aurora's FTP names them. A drive is
+// listed only if its root can be read.
 struct FtpDrive { const char* name; const char* link; const char* path; const char* device; };
-static const FtpDrive FtpDrives[]={{"HDD","\\??\\NBHDD:","NBHDD:","\\Device\\Harddisk0\\Partition1"},
-    {"USB0","\\??\\NBUSB0:","NBUSB0:","\\Device\\Mass0"},{"USB1","\\??\\NBUSB1:","NBUSB1:","\\Device\\Mass1"}};
+static const FtpDrive FtpDrives[]={{"Hdd1","\\??\\NBHDD1:","NBHDD1:","\\Device\\Harddisk0\\Partition1"},
+    {"Usb0","\\??\\NBUSB0:","NBUSB0:","\\Device\\Mass0"},{"Usb1","\\??\\NBUSB1:","NBUSB1:","\\Device\\Mass1"},
+    {"Usb2","\\??\\NBUSB2:","NBUSB2:","\\Device\\Mass2"},{"Dvd","\\??\\NBDVD:","NBDVD:","\\Device\\Cdrom0"}};
+enum { FtpDriveCount=sizeof(FtpDrives)/sizeof(FtpDrives[0]) };
 
 struct Stream {
     HANDLE thread;
@@ -290,12 +293,12 @@ static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,do
     }
     LeaveCriticalSection(&StateLock);
 }
-// Passive-mode FTP server on port 21 until B. Folders: mounted drives that can
-// be read, the app's own drive, and NULL (network only, no disk).
+// Passive-mode FTP server on port 21 until B. Folders match Aurora's FTP: the
+// mounted drives that can be read, then Game for the app's own drive.
 static DWORD WINAPI FtpThread(void*) {
-    nb::FtpRoot roots[5]; int count=0; bool linked[3]={false,false,false};
+    nb::FtpRoot roots[FtpDriveCount+1]; int count=0; bool linked[FtpDriveCount]={false};
     char folders[100]="Folders:";
-    for(int i=0;i<3;++i) {
+    for(int i=0;i<FtpDriveCount;++i) {
         if(LinkDrive(FtpDrives[i].link,FtpDrives[i].device)<0) continue;
         char pattern[16]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\*",FtpDrives[i].path);
         WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(pattern,&entry);
@@ -305,9 +308,8 @@ static DWORD WINAPI FtpThread(void*) {
         linked[i]=true; roots[count].name=FtpDrives[i].name; roots[count].path=FtpDrives[i].path; ++count;
         strcat_s(folders," "); strcat_s(folders,FtpDrives[i].name);
     }
-    roots[count].name="APP"; roots[count].path="game:"; ++count;
-    roots[count].name="NULL"; roots[count].path=NULL; ++count;
-    strcat_s(folders," APP NULL");
+    roots[count].name="Game"; roots[count].path="game:"; ++count;
+    strcat_s(folders," Game");
     char error[100]={0};
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
     bool ready=listener!=INVALID_SOCKET;
@@ -329,7 +331,7 @@ static DWORD WINAPI FtpThread(void*) {
             FtpLoginRequired ? FtpUser : NULL,FtpPassword,observer,error,sizeof(error))) ready=false;
     }
     if(listener!=INVALID_SOCKET) closesocket(listener);
-    for(int i=0;i<3;++i) if(linked[i]) UnlinkDrive(FtpDrives[i].link);
+    for(int i=0;i<FtpDriveCount;++i) if(linked[i]) UnlinkDrive(FtpDrives[i].link);
     EnterCriticalSection(&StateLock); State.ftpPhase=0; State.armed=0; LeaveCriticalSection(&StateLock);
     if(!ready && !IsCancelled(NULL)) Failure(error[0] ? error : "FTP server failed.");
     else { EnterCriticalSection(&StateLock); State.phase=nb::Stopped; strcpy_s(State.message,"FTP server stopped."); LeaveCriticalSection(&StateLock); }
