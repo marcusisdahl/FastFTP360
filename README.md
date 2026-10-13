@@ -17,6 +17,8 @@ FastFTP moves files between your PC and the Xbox's internal drive or USB storage
 - **Last 5 transfers** on screen with file name, size and speed. Everything is also written to `FastFTP.log`.
 - **Network test and disk test** built in, to find out whether the network, the drive or the FTP client is the slow part.
 
+**Best with [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet).** FastFTP was made alongside CUsbEnet 1.1, a USB Ethernet driver plugin for the Xbox 360. Together they're the fastest way we know of to copy files to an Xbox 360 over FTP. All the speeds on this page were measured with a TP-Link UE306 adapter on CUsbEnet. FastFTP also works over the console's built-in network port.
+
 FastFTP is experimental homebrew. Read [Safety](#safety) before using it on files you care about.
 
 ## Contents
@@ -34,7 +36,7 @@ FastFTP is experimental homebrew. Read [Safety](#safety) before using it on file
 
 ## Quick start
 
-You need a console that runs homebrew (XEX) applications, a working network connection, and a PC on the same home network. If you use a USB Ethernet adapter, keep its driver (for example [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet)) loaded as usual.
+You need a console that runs homebrew (XEX) applications, a working network connection, and a PC on the same home network. If you use a USB Ethernet adapter, keep its driver loaded as usual. For the speeds shown here, use [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet) 1.1.
 
 1. Download `FastFTP-<version>.zip` from the [Releases page](https://github.com/marcusisdahl/Xbox360-FastFTP/releases).
 2. Copy `FastFTP.xex` to its own folder on the Xbox, for example `Hdd1:\Apps\FastFTP\`.
@@ -156,7 +158,7 @@ A simple FTP server reads or writes a chunk of the file, then sends or receives 
 
 Network sends go out in 16 KiB pieces with a short yield in between, which keeps the console responsive during long transfers.
 
-Measured on one console with a TP-Link UE306 USB Ethernet adapter:
+Measured on one console with a TP-Link UE306 USB Ethernet adapter and the [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet) 1.1 acksmall driver:
 
 | | PC to Xbox |
 |---|---|
