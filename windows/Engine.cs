@@ -9,6 +9,7 @@ namespace NetBench360 {
     public sealed class TestResult {
         public string Driver, Address, Utc;
         public int Direction, Run, RequestedSeconds, RequestedBuffer, PcSendBuffer, PcRecvBuffer, XboxSendBuffer, XboxRecvBuffer, Streams=1;
+        public int XboxSendLimit, RequestedXboxSendLimit; public bool XboxDrawingPaused;
         public ulong Bytes, Microseconds, Verified;
         public bool VerifyAll;
         public uint Samples;
@@ -20,8 +21,8 @@ namespace NetBench360 {
         public string Phase; public int Direction; public ulong Bytes; public double Seconds, Rate;
     }
     public sealed class Engine : IDisposable {
-        const uint Magic=0x4e423336, Version=1;
-        const int Chunk=65536, Integrity=1048576;
+        const uint Magic=0x4e423336, Version=3;
+        const int Chunk=65536, Integrity=1048576, ResultSize=72;
         public const uint FlagVerifyAll=0x100;
         readonly Socket socket;
         readonly CancellationToken cancel;
@@ -64,10 +65,10 @@ namespace NetBench360 {
             int at=0;
             while(at<length) {
                 Wait(SelectMode.SelectWrite);
-                try { int count=socket.Send(buffer,at,length-at,SocketFlags.None);
+                try { int count=socket.Send(buffer,at,Math.Min(16384,length-at),SocketFlags.None);
                     if(count==0) throw new InvalidOperationException("Connection closed while sending.");
                     at+=count; lastActivity=session.Elapsed.TotalSeconds;
-                } catch(SocketException e) { if(e.SocketErrorCode!=SocketError.WouldBlock) throw; }
+                } catch(SocketException e) { if(e.SocketErrorCode!=SocketError.WouldBlock) throw; Thread.Sleep(1); }
             }
         }
         int Receive(byte[] buffer,int at,int length) {
@@ -76,7 +77,7 @@ namespace NetBench360 {
                 try { int count=socket.Receive(buffer,at,length,SocketFlags.None);
                     if(count>0) lastActivity=session.Elapsed.TotalSeconds;
                     return count;
-                } catch(SocketException e) { if(e.SocketErrorCode!=SocketError.WouldBlock) throw; }
+                } catch(SocketException e) { if(e.SocketErrorCode!=SocketError.WouldBlock) throw; Thread.Sleep(1); }
             }
         }
         void ReceiveAll(byte[] buffer) {
@@ -119,9 +120,11 @@ namespace NetBench360 {
         }
         // bufferSize 0 keeps Windows' automatic socket buffers (receive window
         // autotuning stays on). verifyAll checks every timed byte at the receiver.
-        public TestResult Run(string address,int port,int direction,int seconds,int bufferSize,int warmupMiB,bool verifyAll=false,Action beforeMeasure=null) {
+        // xboxSendLimit applies to each stream, so parallel streams add up.
+        public TestResult Run(string address,int port,int direction,int seconds,int bufferSize,int warmupMiB,int xboxSendLimit=16,bool pauseXboxDrawing=true,bool verifyAll=false,Action beforeMeasure=null) {
             if(direction<1 || direction>2 || seconds<1 || seconds>60 || warmupMiB<1 || warmupMiB>64 ||
-                (bufferSize!=0 && bufferSize!=16384 && bufferSize!=32768 && bufferSize!=65536 && bufferSize!=131072))
+                (bufferSize!=0 && bufferSize!=16384 && bufferSize!=32768 && bufferSize!=65536 && bufferSize!=131072) ||
+                (xboxSendLimit!=0 && xboxSendLimit!=8 && xboxSendLimit!=12 && xboxSendLimit!=16 && xboxSendLimit!=20 && xboxSendLimit!=24 && xboxSendLimit!=32))
                 throw new ArgumentException("Unsupported benchmark settings.");
             Notify("Connecting",direction,0,0,0);
             IPAddress ip=IPAddress.Parse(address);
@@ -139,17 +142,23 @@ namespace NetBench360 {
             socket.Blocking=false;
             lastActivity=session.Elapsed.TotalSeconds;
             uint seed=unchecked((uint)Environment.TickCount) ^ 0x360179u;
-            byte[] request=new byte[32];
-            uint[] fields={Magic,Version,(uint)direction|(verifyAll ? FlagVerifyAll : 0u),(uint)seconds,Chunk,(uint)bufferSize,(uint)warmupMiB,seed};
+            byte[] request=new byte[40];
+            uint options=pauseXboxDrawing ? 1u : 0u;
+            int activeLimit=direction==2 ? xboxSendLimit : 0;
+            uint[] fields={Magic,Version,(uint)direction|(verifyAll ? FlagVerifyAll : 0u),(uint)seconds,Chunk,(uint)bufferSize,(uint)warmupMiB,seed,(uint)xboxSendLimit,options};
             for(int i=0;i<fields.Length;i++) Write32(request,4*i,fields[i]);
             Notify("Negotiating",direction,0,0,0);
-            SendAll(request,32); byte[] response=new byte[32]; ReceiveAll(response);
+            SendAll(request,40); byte[] response=new byte[32]; ReceiveAll(response);
             if(Read32(response,0)!=Magic || Read32(response,4)!=Version || Read32(response,8)!=0 ||
                 Read32(response,12)!=Chunk || Read32(response,24)!=Integrity || Read32(response,28)!=warmupMiB)
-                throw new InvalidOperationException("The Xbox rejected the request, or is running a different protocol version.");
+                throw new InvalidOperationException("The Xbox rejected the request, or is running a different protocol version. Update BOTH apps to v0.2.0.");
+            byte[] settings=new byte[8]; ReceiveAll(settings);
+            if(Read32(settings,0)!=activeLimit || Read32(settings,4)!=options)
+                throw new InvalidOperationException("Xbox diagnostic settings did not match the request.");
             TestResult result=new TestResult { Direction=direction,RequestedSeconds=seconds,RequestedBuffer=bufferSize,
                 Address=address,Utc=DateTime.UtcNow.ToString("o"),VerifyAll=verifyAll,PcSendBuffer=socket.SendBufferSize,PcRecvBuffer=socket.ReceiveBufferSize,
-                XboxSendBuffer=(int)Read32(response,16),XboxRecvBuffer=(int)Read32(response,20) };
+                XboxSendBuffer=(int)Read32(response,16),XboxRecvBuffer=(int)Read32(response,20),
+                XboxSendLimit=activeLimit,RequestedXboxSendLimit=xboxSendLimit,XboxDrawingPaused=pauseXboxDrawing };
             bool sender=direction==1;
             byte[] expected=Pattern(seed),buffer=new byte[Chunk];
             Notify("Checking data",direction,0,0,0); FixedTransfer(sender,expected,buffer,Integrity,true);
@@ -184,17 +193,18 @@ namespace NetBench360 {
             }
             result.Microseconds=(ulong)(timed.Elapsed.TotalSeconds*1000000);
             if(result.Bytes==0 || result.Microseconds==0) throw new InvalidOperationException("Empty measurement.");
-            byte[] wire=new byte[64];
+            byte[] wire=new byte[ResultSize];
             if(sender) {
                 Write32(finish,0,Magic); Write32(finish,4,Version); Write32(finish,8,(uint)direction);
                 Write64(finish,16,result.Bytes); Write64(finish,24,result.Microseconds); SendAll(finish,32);
                 socket.Shutdown(SocketShutdown.Send); ReceiveAll(wire);
                 ulong elapsed=Read64(wire,24);
                 if(Read32(wire,0)!=Magic || Read32(wire,4)!=Version || Read32(wire,8)!=direction || Read32(wire,12)!=0 ||
-                    Read64(wire,16)!=result.Bytes || elapsed==0 || elapsed>180000000 || Read32(wire,52)!=Integrity)
+                    Read64(wire,16)!=result.Bytes || elapsed==0 || elapsed>180000000 || Read32(wire,52)!=Integrity ||
+                    Read32(wire,56)!=activeLimit || Read32(wire,60)!=options)
                     throw new InvalidOperationException("Receiver totals did not match the transfer.");
                 result.Microseconds=elapsed; result.Minimum=Read32(wire,32)/1024.0; result.Maximum=Read32(wire,36)/1024.0;
-                result.Samples=Read32(wire,48); result.Verified=Read64(wire,56);
+                result.Samples=Read32(wire,48); result.Verified=Read64(wire,64);
                 if(verifyAll && result.Verified!=result.Bytes) throw new InvalidOperationException("The Xbox did not check all data. Use the updated Xbox XEX.");
             } else {
                 ulong sentTime=Read64(finish,24);
@@ -209,7 +219,8 @@ namespace NetBench360 {
                 Write64(wire,16,result.Bytes); Write64(wire,24,result.Microseconds);
                 Write32(wire,32,(uint)(result.Minimum*1024)); Write32(wire,36,(uint)(result.Maximum*1024));
                 Write32(wire,40,(uint)result.XboxSendBuffer); Write32(wire,44,(uint)result.XboxRecvBuffer);
-                Write32(wire,48,result.Samples); Write32(wire,52,Integrity); Write64(wire,56,result.Verified); SendAll(wire,64);
+                Write32(wire,48,result.Samples); Write32(wire,52,Integrity);
+                Write32(wire,56,(uint)activeLimit); Write32(wire,60,options); Write64(wire,64,result.Verified); SendAll(wire,ResultSize);
             }
             Notify("Complete",direction,result.Bytes,result.Microseconds/1000000.0,result.Rate);
             return result;

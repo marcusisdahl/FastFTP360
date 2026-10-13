@@ -3,12 +3,24 @@
 ## 0.2.0
 
 - Optional full data check: the receiver compares every timed byte with the pattern (PC "Data check: All data").
-- Parallel TCP streams: the PC can run 1, 2 or 4 connections at once; the Xbox serves each on its own thread and shows their combined rate. Streams start their timed phase together.
+- Parallel TCP streams: the PC can run 1, 2 or 4 connections at once; the Xbox serves each on its own thread and shows their combined rate. Streams start their timed phase together. The Xbox send limit applies per stream.
 - PC "Windows automatic" socket buffers keep receive-window autotuning on.
 - Xbox D-pad settings while stopped: listener socket buffers (startup 64 KiB, 128 KiB, 256 KiB) and the hardware thread for stream workers.
 - CSV adds `streams` and `verified_bytes`.
+- Keeps every 0.1.3 diagnostic control (send limit, paused drawing, 16 KiB sends) and its defaults.
 
-Protocol v1 stays compatible for existing settings. The new data check, automatic PC buffers and parallel streams need the v0.2.0 Xbox XEX.
+Protocol v3: **both applications must be updated**. The receiver result grows to 72 bytes to carry the checked byte count. Older peers fail promptly.
+
+## 0.1.3 diagnostic
+
+- Respond to a reported whole-console freeze during unlimited Xbox-to-PC testing; the cause remains unknown.
+- Split sends into at most 16 KiB calls; yield successful C++ sends and sleep before would-block retries.
+- Negotiate an Xbox send cap covering integrity, warm-up and timed data; default to 16 MiB/s. Mark caps in the UI/CSV and keep medians separate.
+- Optionally pause Xbox drawing after GPU-idle acknowledgement while still polling the controller. PC progress remains live.
+- Default to one 10-second Xbox-to-PC run. Add cap, diagnostic metadata, slow-receiver and forced would-block tests.
+- Use protocol v2: **both applications must be updated**. Old v1 peers fail promptly.
+
+This is an unvalidated diagnostic revision, not a proven crash fix. Use the known-working Baseline driver for the first control. See the crash investigation notes.
 
 ## 0.1.2
 

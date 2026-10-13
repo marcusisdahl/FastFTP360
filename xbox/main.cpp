@@ -9,6 +9,7 @@ static CRITICAL_SECTION StateLock;
 static nb::UiState State;
 static volatile LONG Cancel=0;
 static HANDLE Worker=NULL;
+static HANDLE GraphicsIdle=NULL;
 static bool NetworkReady=false;
 static IDirect3DDevice9* Device=NULL;
 static IDirect3DVertexShader9* VertexShader=NULL;
@@ -39,6 +40,8 @@ static Stream Streams[nb::MaxStreams];
 static int ActiveStreams=0;
 static double BatchRate[3];
 static int BatchCount=0;
+// Each stream paces itself, so a capped batch sends at most this many MiB/s in total.
+static DWORD BatchLimit=0;
 static bool BatchFailed=false;
 
 static void DescribeSettings() {
@@ -70,7 +73,20 @@ static void Progress(void* context,nb::Phase phase,DWORD direction,nb::U64 bytes
     } else { State.mebibytes=double(bytes)/1048576; State.elapsed=elapsed; State.rate=rate; }
     LeaveCriticalSection(&StateLock);
 }
-static void Configure(void*,DWORD seconds) { EnterCriticalSection(&StateLock); State.duration=seconds; LeaveCriticalSection(&StateLock); }
+static bool Configure(void*,DWORD seconds,DWORD limit,DWORD options) {
+    if(options&nb::PauseDrawing) {
+        if(!GraphicsIdle || !ResetEvent(GraphicsIdle)) return false;
+    }
+    EnterCriticalSection(&StateLock);
+    State.duration=seconds; State.rateLimit=limit; State.options=options;
+    LeaveCriticalSection(&StateLock);
+    if(!(options&nb::PauseDrawing)) return true;
+    double deadline=nb::Now()+5;
+    while(!IsCancelled(NULL) && nb::Now()<deadline) {
+        if(WaitForSingleObject(GraphicsIdle,100)==WAIT_OBJECT_0) return true;
+    }
+    return false;
+}
 static void Failure(const char* message) {
     EnterCriticalSection(&StateLock); State.phase=nb::Failed;
     _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"%s",message); LeaveCriticalSection(&StateLock);
@@ -83,19 +99,23 @@ static DWORD WINAPI StreamThread(void* context) {
     bool ok=nb::Serve(stream->socket,observer,stream->result,stream->error,sizeof(stream->error));
     closesocket(stream->socket); stream->socket=INVALID_SOCKET;
     EnterCriticalSection(&StateLock);
-    if(ok) { BatchRate[stream->result.direction]+=stream->result.Rate(); ++BatchCount; }
+    if(ok) {
+        BatchRate[stream->result.direction]+=stream->result.Rate(); ++BatchCount;
+        if(stream->result.direction==2) BatchLimit+=stream->result.rateLimit;
+    }
     else if(!IsCancelled(NULL)) { BatchFailed=true; State.phase=nb::Failed; _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"%s",stream->error); }
     stream->phase=nb::Idle; stream->bytes=0; stream->rate=0;
     if(--ActiveStreams==0) {
+        State.options=0;
         // A batch with any failed stream reports no rate.
         if(BatchCount && !BatchFailed) {
             if(BatchRate[1]>0) State.upload=BatchRate[1];
-            if(BatchRate[2]>0) State.download=BatchRate[2];
+            if(BatchRate[2]>0) { State.download=BatchRate[2]; State.downloadLimit=BatchLimit; }
             ++State.completed;
             if(BatchCount>1) _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"%d STREAMS PASSED THEIR DATA CHECKS. READY FOR THE NEXT PC TEST.",BatchCount);
             else strcpy_s(State.message,stream->result.verified ? "ALL DATA CHECKED. READY FOR THE NEXT PC TEST." : "DATA CHECK PASSED. READY FOR THE NEXT PC TEST.");
         }
-        BatchRate[1]=BatchRate[2]=0; BatchCount=0; BatchFailed=false;
+        BatchRate[1]=BatchRate[2]=0; BatchCount=0; BatchLimit=0; BatchFailed=false;
     }
     State.streams=ActiveStreams;
     LeaveCriticalSection(&StateLock);
@@ -208,12 +228,13 @@ void __cdecl main() {
     for(int i=0;i<nb::MaxStreams;++i) { Streams[i].thread=NULL; Streams[i].socket=INVALID_SOCKET; }
     DescribeSettings();
     if(!InitGraphics()) XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);
+    GraphicsIdle=CreateEvent(NULL,TRUE,FALSE,NULL);
     XNetStartupParams network={0}; network.cfgSizeOfStruct=sizeof(network); network.cfgFlags=XNET_STARTUP_BYPASS_SECURITY;
     network.cfgSockDefaultRecvBufsizeInK=64; network.cfgSockDefaultSendBufsizeInK=64;
     bool xnet=XNetStartup(&network)==0; WSADATA wsa;
     NetworkReady=xnet && WSAStartup(MAKEWORD(2,2),&wsa)==0;
     if(!NetworkReady) Failure("NETWORK STARTUP FAILED. BACK TO EXIT.");
-    WORD previous=0; double lastAddress=0;
+    WORD previous=0; double lastAddress=0; bool renderingPaused=false;
     for(;;) {
         if(Worker && WaitForSingleObject(Worker,0)==WAIT_OBJECT_0) { CloseHandle(Worker); Worker=NULL; }
         if(NetworkReady && nb::Now()-lastAddress>=1) {
@@ -245,10 +266,17 @@ void __cdecl main() {
         }
         if((pressed&XINPUT_GAMEPAD_BACK) && !Worker) break;
         EnterCriticalSection(&StateLock); nb::UiState snapshot=State; LeaveCriticalSection(&StateLock);
-        Render(snapshot);
+        if(snapshot.armed && (snapshot.options&nb::PauseDrawing)) {
+            if(!renderingPaused) {
+                strcpy_s(snapshot.message,"DRAWING PAUSED. USE PC FOR LIVE PROGRESS. B STILL STOPS.");
+                Render(snapshot); Device->BlockUntilIdle(); renderingPaused=true;
+            }
+            if(GraphicsIdle) SetEvent(GraphicsIdle);
+        } else { renderingPaused=false; Render(snapshot); }
         // Ten UI updates per second keep rendering work modest during a test.
         Sleep(100);
     }
     if(NetworkReady) WSACleanup(); if(xnet) XNetCleanup();
+    if(GraphicsIdle) CloseHandle(GraphicsIdle);
     XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);
 }

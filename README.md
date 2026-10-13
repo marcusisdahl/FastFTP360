@@ -1,26 +1,30 @@
 # NetBench360
 
-A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.2.0 adds a full data check, parallel TCP streams, automatic PC socket buffers and Xbox-side buffer and CPU settings for finding where throughput stops. The Xbox UI and listener have been exercised on hardware; the 0.2.0 features still need console validation.
+A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.2.0 adds a full data check, parallel TCP streams, automatic PC socket buffers and Xbox-side buffer and CPU settings for finding where throughput stops. It keeps the 0.1.3 diagnostic controls (yielding sends, a selectable Xbox send limit and optional paused rendering), added after a console freeze/restart during an unlimited Xbox-to-PC run with v0.1.2 and TxScan. The cause of that freeze remains unknown, and the 0.2.0 features still need console validation.
 
-**Updating from v0.1 or v0.1.1:** stop and exit the Xbox app, replace its application XEX with the v0.1.2 XEX, and relaunch it. The previous PC clients remain protocol-compatible; the updated companion clarifies the buffer setting. Changing only the PC executable will not fix the Xbox setup errors. Neither application needs to be run automatically at boot; the Windows app needs no administrator privileges.
+**Update both applications to v0.2.0.** Protocol v3 explicitly negotiates the send limit and rendering option; older versions are rejected. Stop and exit the Xbox app before replacing its application XEX. Neither application needs to be run automatically at boot; the Windows app needs no administrator privileges. See [crash investigation](docs/CRASH-INVESTIGATION.md).
 
 It measures one to four TCP streams in either direction without reading or writing benchmark data to the Xbox drive. It is useful for comparing CUsbEnet builds and separating network limits from FTP, dashboard, or disk overhead. It measures the application, TCP stack, driver and link together, not raw USB bandwidth. It is a custom protocol, not an iperf server.
 
 ## Run a first test
 
-1. Leave the currently working network driver installed. Copy `NetBench360.xex` into its **own application folder**, for example `Hdd1:\Apps\NetBench360\`. Launch it from Aurora or your usual homebrew launcher. **Do not add this XEX to launch.ini as a plugin.**
+1. For investigation of the freeze, restore the previously working **Baseline CUsbEnet driver** using your existing plugin/recovery method, preserving the current XEX and launch.ini backup. Reboot between driver builds. Copy `NetBench360.xex` into its **own application folder**, for example `Hdd1:\Apps\NetBench360\`. Launch it from Aurora or your usual homebrew launcher. **Do not add this XEX to launch.ini as a plugin.**
 2. Press **A** on the Xbox to listen. Note the IP address on screen.
 3. Run `NetBench360-PC.exe` on a Windows PC on the same trusted LAN. Enter that IP. The PC app uses .NET Framework 4.5 or newer and requires no installer.
-4. For the first check, choose **Both directions, 10 seconds, 1 per direction, 64 KiB**. Set the driver label to the build actually loaded, such as `TxScan`. Click **Start benchmark**.
+4. For the first diagnostic check, choose **Xbox to PC, 10 seconds, 1 repeat, 64 KiB PC buffers, 16 MiB/s Xbox send limit**, with **Pause Xbox drawing** checked. Set the driver label to the build actually loaded, such as `Baseline`. Click **Start benchmark**. The cap applies to Xbox sending during the integrity check, warm-up and timed transfer.
 5. Save the CSV after completion. On Xbox, **B** stops the listener/test; once stopped, **Back** returns to the dashboard. PC **Stop** cancels the current batch and keeps earlier completed results.
 
 The PC label is only a note: it does not detect, install, or switch a driver. The Xbox screen keeps the latest completed rate in each direction. The Windows summary shows medians for matching IP, label, duration and buffer settings in the current session.
+
+With drawing paused, the Xbox deliberately holds a screen saying to use the PC for live progress. Controller B is still polled. Normal rendering resumes when the test finishes or stops. A static Xbox picture in this mode is expected; the PC's live progress and the response to B distinguish it from a frozen console.
 
 NetBench360 uses the console's existing network route. To measure a USB Ethernet adapter, ensure the console is actually using that adapter rather than native Ethernet or Wi-Fi. It does not select the adapter for you. Stop FTP transfers and other traffic while measuring.
 
 ## Compare driver builds
 
-After the first test works, use **20 seconds, 3 repeats per direction, 64 KiB** for every build. Both directions run sequentially, alternating within each repeat. Save a separate CSV for each driver. Compare the medians and the spread of individual runs, then repeat the baseline to check for ordinary variation. A few tenths of a MiB/s alone is not convincing evidence of a driver improvement.
+First establish that the diagnostic run finishes on the baseline. A **capped result does not measure maximum throughput**. The cap and drawing setting appear in the UI and CSV, and medians do not mix those settings. Do not repeat the unlimited v0.1.2 test while investigating the freeze. If another freeze occurs, stop the experiment and retain the last working driver; host tests cannot make console testing safe.
+
+Once a working control is established, change one variable at a time. Keep duration, repeats, PC buffers, Xbox cap and drawing setting identical when comparing driver builds. Both directions run sequentially if selected. Save separate CSV files and repeat the baseline to check ordinary variation. A few tenths of a MiB/s alone is not convincing evidence of a driver improvement. The Unlimited setting is available for later testing, but was the condition under which the reported freeze occurred.
 
 - If RAM throughput is substantially above FTP throughput, the FTP application and/or storage path likely contributes to the FTP limit. This test alone cannot distinguish those two causes.
 - If RAM throughput stays close to FTP, investigate the network path and benchmark/stack overhead before attributing the limit to the drive.
@@ -31,16 +35,16 @@ After the first test works, use **20 seconds, 3 repeats per direction, 64 KiB** 
 ## Find the bottleneck
 
 - **Full data check.** Set **Data check** to **All data** to compare every timed byte, not only the first 1 MiB. Use it whenever you test an experimental driver build, such as CUsbEnet with `USBENET_AX88179_TX_AGGREGATION=1`. It costs some CPU on the receiver, so compare rates with the same setting.
-- **Parallel streams.** Run the same test with 1, 2 and 4 streams. If 2 or 4 streams are clearly faster than 1, one TCP connection's window is the limit, not the driver or USB. If the total stays flat, look at the driver and USB path.
+- **Parallel streams.** Run the same test with 1, 2 and 4 streams. If 2 or 4 streams are clearly faster than 1, one TCP connection's window is the limit, not the driver or USB. If the total stays flat, look at the driver and USB path. The Xbox send limit applies to each stream, so set it to Unlimited (once the Baseline control run has passed) or account for streams × limit.
 - **PC socket buffers.** **Windows automatic** leaves receive-window autotuning on. Any fixed size turns it off for that connection.
 - **Xbox settings (D-pad, while stopped).** Up/Down cycles the listener's socket buffers: the 64 KiB startup default, 128 KiB or 256 KiB. Accepted connections inherit them; the actual sizes are shown in the CSV. Left/Right picks the hardware thread for stream workers: automatic or thread 0-5. USB completions run on hardware thread 2, so compare 2 with another thread. An error naming the buffer size means XNet refused it.
 
 ## What a run does
 
-1. Negotiate direction and time over TCP port **36020**, and report the actual buffers at both ends.
+1. Negotiate direction, time, Xbox send limit and rendering mode over TCP port **36020**, and report actual buffers at both ends.
 2. Transfer and validate **1 MiB** of known data outside the timed measurement.
 3. Transfer a **32 MiB warm-up**, also outside the measurement.
-4. Reuse 64 KiB memory blocks for the requested duration. There is no growing RAM file. Each C++ stream uses two 64 KiB buffers, plus socket and UI memory.
+4. Reuse 64 KiB memory blocks for the requested duration, with individual sends limited to 16 KiB and explicit yields. There is no growing RAM file. Each C++ stream uses two 64 KiB buffers, plus socket and UI memory. The Xbox sender waits between blocks when capped; software scheduling may produce a rate below the selected limit.
 5. Send a completion record, half-close the sending stream, and drain it at the receiver. The receiver reports payload bytes and elapsed time; the sender checks that byte totals agree. An interrupted stream without the completion record fails.
 
 The initial integrity check is a smoke test. **Timed payload is not checked byte by byte unless you choose the All data check**, and even then a passed run is not proof that a driver can never corrupt data. The 32-byte completion record is excluded from final payload bytes; its transmission and TCP drain are included in receiver elapsed time. Current-rate samples can include those final 32 bytes, a negligible difference; the final average excludes them.
