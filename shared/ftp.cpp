@@ -240,11 +240,13 @@ static U64 NullSize(const char* name) {
 static void FormatEntry(char* line,size_t capacity,const char* name,bool directory,U64 size,const FILETIME* time,bool namesOnly) {
     if(namesOnly) { _snprintf_s(line,capacity,_TRUNCATE,"%s\r\n",name); return; }
     static const char* months[]={"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-    SYSTEMTIME st={0}; st.wYear=2005; st.wMonth=11; st.wDay=22;
+    // Same shape as Aurora's listing: everything rwx for root, and 1 Jan 2000
+    // where there is no time (the drive folders).
+    SYSTEMTIME st={0}; st.wYear=2000; st.wMonth=1; st.wDay=1;
     if(time) FileTimeToSystemTime(time,&st);
     if(st.wMonth<1 || st.wMonth>12) st.wMonth=1;
-    _snprintf_s(line,capacity,_TRUNCATE,"%s 1 xbox xbox %I64u %s %2u %04u %s\r\n",
-        directory ? "drwxr-xr-x" : "-rw-r--r--",size,months[st.wMonth-1],st.wDay,st.wYear,name);
+    _snprintf_s(line,capacity,_TRUNCATE,"%s 1 root root %I64u %s %2u %04u %s\r\n",
+        directory ? "drwxrwxrwx" : "-rwxrwxrwx",size,months[st.wMonth-1],st.wDay,st.wYear,name);
 }
 
 void Session::List(const char* argument,bool namesOnly) {

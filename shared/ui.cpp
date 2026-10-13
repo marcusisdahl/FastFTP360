@@ -98,8 +98,8 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
             else strcpy_s(login,"Passive mode, any user name and password.");
             lines[0]=text; lines[1]=login; lines[2]=s.message;
         } else {
-            lines[0]="Serves the drives with Aurora's folder names:";
-            lines[1]="Hdd1, Usb0-Usb2, Dvd, and Game for the app drive.";
+            lines[0]="Lists the drives the way Aurora's FTP does:";
+            lines[1]="Game, Hdd1, HddX, SysExt, System, Usb0, USBMU0...";
             lines[2]=s.ftpUser[0] ? "Not encrypted. Use it only on a trusted network." : "No password. Use it only on a trusted network.";
         }
     } else {

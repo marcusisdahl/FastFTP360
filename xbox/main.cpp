@@ -2,6 +2,7 @@
 #include <xtl.h>
 #include <d3dx9.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "../shared/bench.h"
 #include "../shared/ui.h"
 #include "../shared/ftp.h"
@@ -56,13 +57,27 @@ static void UnlinkDrive(const char* name) {
     KernelString link={USHORT(strlen(nameText)),USHORT(sizeof(nameText)),nameText};
     ObDeleteSymbolicLink(&link);
 }
-// FTP folders backed by drives, named as Aurora's FTP names them. A drive is
-// listed only if its root can be read.
-struct FtpDrive { const char* name; const char* link; const char* path; const char* device; };
-static const FtpDrive FtpDrives[]={{"Hdd1","\\??\\NBHDD1:","NBHDD1:","\\Device\\Harddisk0\\Partition1"},
-    {"Usb0","\\??\\NBUSB0:","NBUSB0:","\\Device\\Mass0"},{"Usb1","\\??\\NBUSB1:","NBUSB1:","\\Device\\Mass1"},
-    {"Usb2","\\??\\NBUSB2:","NBUSB2:","\\Device\\Mass2"},{"Dvd","\\??\\NBDVD:","NBDVD:","\\Device\\Cdrom0"}};
+// FTP folders backed by drives, with the names Aurora's FTP gives them. Each is
+// linked as \??\NB<name>: to the first device path whose root can be read;
+// drives that are absent or unreadable are not listed.
+struct FtpDrive { const char* name; const char* devices[2]; };
+static const FtpDrive FtpDrives[]={
+    {"Hdd1",{"\\Device\\Harddisk0\\Partition1",NULL}},
+    {"HddX",{"\\Device\\Harddisk0\\SystemPartition",NULL}},
+    {"SysExt",{"\\Device\\Harddisk0\\SystemExtPartition",NULL}},
+    {"System",{"\\Device\\Harddisk0\\SystemAuxPartition",NULL}},
+    {"Usb0",{"\\Device\\Mass0",NULL}},{"Usb1",{"\\Device\\Mass1",NULL}},{"Usb2",{"\\Device\\Mass2",NULL}},
+    {"USBMU0",{"\\Device\\Mass0PartitionFile\\Storage",NULL}},
+    {"USBMU1",{"\\Device\\Mass1PartitionFile\\Storage",NULL}},
+    {"USBMU2",{"\\Device\\Mass2PartitionFile\\Storage",NULL}},
+    {"USBMUCache0",{"\\Device\\Mass0PartitionFile\\StorageSystem","\\Device\\Mass0PartitionFile\\SystemCache"}},
+    {"USBMUCache1",{"\\Device\\Mass1PartitionFile\\StorageSystem","\\Device\\Mass1PartitionFile\\SystemCache"}},
+    {"USBMUCache2",{"\\Device\\Mass2PartitionFile\\StorageSystem","\\Device\\Mass2PartitionFile\\SystemCache"}}};
 enum { FtpDriveCount=sizeof(FtpDrives)/sizeof(FtpDrives[0]) };
+static char FtpLinks[FtpDriveCount][24],FtpPaths[FtpDriveCount][24];
+static int CompareRoots(const void* a,const void* b) {
+    return _stricmp(static_cast<const nb::FtpRoot*>(a)->name,static_cast<const nb::FtpRoot*>(b)->name);
+}
 
 struct Stream {
     HANDLE thread;
@@ -293,23 +308,27 @@ static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,do
     }
     LeaveCriticalSection(&StateLock);
 }
-// Passive-mode FTP server on port 21 until B. Folders match Aurora's FTP: the
-// mounted drives that can be read, then Game for the app's own drive.
+// Passive-mode FTP server on port 21 until B. The top level matches Aurora's
+// FTP: the readable drives plus Game for the app's own drive, sorted by name.
 static DWORD WINAPI FtpThread(void*) {
     nb::FtpRoot roots[FtpDriveCount+1]; int count=0; bool linked[FtpDriveCount]={false};
-    char folders[100]="Folders:";
     for(int i=0;i<FtpDriveCount;++i) {
-        if(LinkDrive(FtpDrives[i].link,FtpDrives[i].device)<0) continue;
-        char pattern[16]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\*",FtpDrives[i].path);
-        WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(pattern,&entry);
-        bool readable=find!=INVALID_HANDLE_VALUE || GetLastError()==ERROR_FILE_NOT_FOUND;
-        if(find!=INVALID_HANDLE_VALUE) FindClose(find);
-        if(!readable) { UnlinkDrive(FtpDrives[i].link); continue; }
-        linked[i]=true; roots[count].name=FtpDrives[i].name; roots[count].path=FtpDrives[i].path; ++count;
-        strcat_s(folders," "); strcat_s(folders,FtpDrives[i].name);
+        _snprintf_s(FtpLinks[i],sizeof(FtpLinks[i]),_TRUNCATE,"\\??\\NB%s:",FtpDrives[i].name);
+        _snprintf_s(FtpPaths[i],sizeof(FtpPaths[i]),_TRUNCATE,"NB%s:",FtpDrives[i].name);
+        for(int d=0;d<2 && FtpDrives[i].devices[d] && !linked[i];++d) {
+            if(LinkDrive(FtpLinks[i],FtpDrives[i].devices[d])<0) continue;
+            char pattern[40]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\*",FtpPaths[i]);
+            WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(pattern,&entry);
+            bool readable=find!=INVALID_HANDLE_VALUE || GetLastError()==ERROR_FILE_NOT_FOUND;
+            if(find!=INVALID_HANDLE_VALUE) FindClose(find);
+            if(readable) linked[i]=true; else UnlinkDrive(FtpLinks[i]);
+        }
+        if(linked[i]) { roots[count].name=FtpDrives[i].name; roots[count].path=FtpPaths[i]; ++count; }
     }
     roots[count].name="Game"; roots[count].path="game:"; ++count;
-    strcat_s(folders," Game");
+    qsort(roots,count,sizeof(roots[0]),CompareRoots);
+    char folders[100]="Folders:";
+    for(int i=0;i<count;++i) { strncat_s(folders," ",_TRUNCATE); strncat_s(folders,roots[i].name,_TRUNCATE); }
     char error[100]={0};
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
     bool ready=listener!=INVALID_SOCKET;
@@ -331,7 +350,7 @@ static DWORD WINAPI FtpThread(void*) {
             FtpLoginRequired ? FtpUser : NULL,FtpPassword,observer,error,sizeof(error))) ready=false;
     }
     if(listener!=INVALID_SOCKET) closesocket(listener);
-    for(int i=0;i<FtpDriveCount;++i) if(linked[i]) UnlinkDrive(FtpDrives[i].link);
+    for(int i=0;i<FtpDriveCount;++i) if(linked[i]) UnlinkDrive(FtpLinks[i]);
     EnterCriticalSection(&StateLock); State.ftpPhase=0; State.armed=0; LeaveCriticalSection(&StateLock);
     if(!ready && !IsCancelled(NULL)) Failure(error[0] ? error : "FTP server failed.");
     else { EnterCriticalSection(&StateLock); State.phase=nb::Stopped; strcpy_s(State.message,"FTP server stopped."); LeaveCriticalSection(&StateLock); }

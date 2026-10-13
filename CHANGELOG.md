@@ -7,7 +7,7 @@
 - A **settings panel** per tab: D-pad Up/Down picks a setting, Left/Right changes it. Settings are locked while something runs.
 - New setting **Drawing during transfers** (Network and FTP tabs), **Paused** by default: the screen holds one frame while data moves, as with the PC's "Pause Xbox drawing". The first console run of this prototype crashed about 5 seconds into Xbox sends (FTP and Xbox-to-PC) with live drawing.
 - **FTP login**: user `xboxftp`, password `xboxftp` by default. The FTP tab's **Login** setting can switch it off (any user, as before). Wrong passwords get `530` after a one-second pause, and other commands are refused until login. Three new checks in `tests/ftp.py`.
-- **FTP folders match Aurora's FTP**: `Hdd1`, `Usb0`, `Usb1`, `Usb2`, `Dvd` (only drives that can be read) and `Game` for the app's own drive, replacing `HDD`, `USB0`, `USB1`, `APP` and `NULL`. The `NULL` test folder is no longer listed on the Xbox.
+- **FTP top level listed like Aurora's FTP**: `Game`, `Hdd1`, `HddX`, `SysExt`, `System`, `Usb0`-`Usb2`, `USBMU0`-`USBMU2`, `USBMUCache0`-`USBMUCache2` (only drives that can be read), sorted by name. Listings use `rwxrwxrwx root root`, and the drive folders are dated 1 Jan 2000, as in Aurora. Replaces `HDD`, `USB0`, `USB1`, `APP` and `NULL`; the `NULL` test folder is no longer listed on the Xbox.
 - The footer shows only the buttons that do something right now, and the layout stays inside the title-safe area.
 - `xbox/imgui_impl_xbox360.cpp` renders ImGui with a shader pair, since the stock DX9 backend needs fixed-function D3D that the 360 lacks.
 - `tests/ui_preview.cpp` rasterizes the ImGui output in software, so the screen can still be checked without a console.

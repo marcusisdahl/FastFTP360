@@ -24,7 +24,7 @@ NetBench360 uses the console's existing network route. To measure a USB Ethernet
 
 A small built-in FTP server for comparing with Aurora's FTP using the same driver, drive and PC. With the Xbox app stopped, switch to the **FTP server** tab with **LB**/**RB** and press **A**. The screen shows the folders and the address; connect an FTP client to that IP on port **21** in **passive mode**, with user name **xboxftp** and password **xboxftp**. The **Login** setting on the FTP tab can switch the login off so any user name and password work. **B** stops the server.
 
-- The top-level folders match Aurora's FTP: `Hdd1` (internal drive), `Usb0`, `Usb1`, `Usb2` (USB drives), `Dvd` (disc, read-only) and `Game` (the drive NetBench360 was launched from). Only drives that are present are listed, so paths such as `/Hdd1/Content/...` work the same in both servers.
+- The top level is listed as Aurora's FTP lists it: `Game` (the drive NetBench360 was launched from), `Hdd1` (internal drive), `HddX`, `SysExt`, `System` (system partitions), `Usb0`-`Usb2` (USB drives), `USBMU0`-`USBMU2` and `USBMUCache0`-`USBMUCache2` (USB sticks formatted by the Xbox), sorted by name, as `drwxrwxrwx root root` dated 1 Jan 2000. Only drives that are present and readable are listed, so paths such as `/Hdd1/Content/...` work the same in both servers.
 - The Xbox shows the live rate and the last transfer's average. The client log shows the same in the `226` reply.
 
 Suggested comparison, same file and PC each time: upload to `Hdd1`, then to the USB drive, then download a file from `Hdd1`. Compare with the same transfers through Aurora.

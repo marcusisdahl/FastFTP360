@@ -80,11 +80,11 @@ int main(int argc,char** argv) {
         strcpy_s(state.disk,"USB 0, 64 KiB blocks: write 8.52, read 24.10 MiB/s, all data checked");
     } else if(!strcmp(scene,"ftp")) {
         state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=2; state.mebibytes=812.5; state.elapsed=31.2; state.rate=26.04;
-        strcpy_s(state.message,"Folders: Hdd1 Usb0 Game");
+        strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 USBMU0 USBMUCache0");
         strcpy_s(state.ftp,"Upload, 1024.0 MiB in 41.3 s: 24.79 MiB/s");
     } else if(!strcmp(scene,"ftpon")) {
         state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=1; state.focus=1;
-        strcpy_s(state.message,"Folders: Hdd1 Usb0 Game");
+        strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 USBMU0 USBMUCache0");
     } else if(!strcmp(scene,"error")) {
         state.phase=7; state.focus=1;
         strcpy_s(state.message,"Receive failed during warm-up (10054). Check the cable and press A to listen again.");
