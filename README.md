@@ -1,10 +1,10 @@
 # NetBench360
 
-A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.1.2 addresses the console-reported LAN-option and receive-buffer setup failures, adds listener port reuse, and reports precise listener errors. The Xbox UI and listener have been exercised on hardware; timed console transfers still need validation.
+A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 consoles, with a small Xbox screen and a Windows companion. Version 0.2.0 adds a full data check, parallel TCP streams, automatic PC socket buffers and Xbox-side buffer and CPU settings for finding where throughput stops. The Xbox UI and listener have been exercised on hardware; the 0.2.0 features still need console validation.
 
 **Updating from v0.1 or v0.1.1:** stop and exit the Xbox app, replace its application XEX with the v0.1.2 XEX, and relaunch it. The previous PC clients remain protocol-compatible; the updated companion clarifies the buffer setting. Changing only the PC executable will not fix the Xbox setup errors. Neither application needs to be run automatically at boot; the Windows app needs no administrator privileges.
 
-It measures one TCP stream in either direction without reading or writing benchmark data to the Xbox drive. It is useful for comparing CUsbEnet builds and separating network limits from FTP, dashboard, or disk overhead. It measures the application, TCP stack, driver and link together, not raw USB bandwidth. It is a custom protocol, not an iperf server.
+It measures one to four TCP streams in either direction without reading or writing benchmark data to the Xbox drive. It is useful for comparing CUsbEnet builds and separating network limits from FTP, dashboard, or disk overhead. It measures the application, TCP stack, driver and link together, not raw USB bandwidth. It is a custom protocol, not an iperf server.
 
 ## Run a first test
 
@@ -28,17 +28,24 @@ After the first test works, use **20 seconds, 3 repeats per direction, 64 KiB** 
 
 `MiB/s` uses 1,048,576 bytes per second; multiply by 8.388608 for decimal Mbit/s. Low/high values are receiver samples covering at least one second; the final partial interval is excluded. Overall average includes the whole measured payload transfer and drain.
 
+## Find the bottleneck
+
+- **Full data check.** Set **Data check** to **All data** to compare every timed byte, not only the first 1 MiB. Use it whenever you test an experimental driver build, such as CUsbEnet with `USBENET_AX88179_TX_AGGREGATION=1`. It costs some CPU on the receiver, so compare rates with the same setting.
+- **Parallel streams.** Run the same test with 1, 2 and 4 streams. If 2 or 4 streams are clearly faster than 1, one TCP connection's window is the limit, not the driver or USB. If the total stays flat, look at the driver and USB path.
+- **PC socket buffers.** **Windows automatic** leaves receive-window autotuning on. Any fixed size turns it off for that connection.
+- **Xbox settings (D-pad, while stopped).** Up/Down cycles the listener's socket buffers: the 64 KiB startup default, 128 KiB or 256 KiB. Accepted connections inherit them; the actual sizes are shown in the CSV. Left/Right picks the hardware thread for stream workers: automatic or thread 0-5. USB completions run on hardware thread 2, so compare 2 with another thread. An error naming the buffer size means XNet refused it.
+
 ## What a run does
 
 1. Negotiate direction and time over TCP port **36020**, and report the actual buffers at both ends.
 2. Transfer and validate **1 MiB** of known data outside the timed measurement.
 3. Transfer a **32 MiB warm-up**, also outside the measurement.
-4. Reuse 64 KiB memory blocks for the requested duration. There is no growing RAM file. The C++ session uses two 64 KiB buffers, plus socket and UI memory.
+4. Reuse 64 KiB memory blocks for the requested duration. There is no growing RAM file. Each C++ stream uses two 64 KiB buffers, plus socket and UI memory.
 5. Send a completion record, half-close the sending stream, and drain it at the receiver. The receiver reports payload bytes and elapsed time; the sender checks that byte totals agree. An interrupted stream without the completion record fails.
 
-The initial integrity check is a smoke test. **Timed payload is not checked byte by byte**, so a passed run is not proof that a driver can never corrupt data. The 32-byte completion record is excluded from final payload bytes; its transmission and TCP drain are included in receiver elapsed time. Current-rate samples can include those final 32 bytes, a negligible difference; the final average excludes them.
+The initial integrity check is a smoke test. **Timed payload is not checked byte by byte unless you choose the All data check**, and even then a passed run is not proof that a driver can never corrupt data. The 32-byte completion record is excluded from final payload bytes; its transmission and TCP drain are included in receiver elapsed time. Current-rate samples can include those final 32 bytes, a negligible difference; the final average excludes them.
 
-Tests stop on errors, 15 seconds without socket activity, or a 180-second session limit. Requests are bounded to 60 seconds, 64 KiB transfer blocks, 16/32/64/128 KiB socket buffers and 1-64 MiB warm-up. The UI offers a narrower set of normal test durations. Actual buffers at both ends are recorded in CSV.
+Tests stop on errors, 15 seconds without socket activity, or a 180-second session limit. Requests are bounded to 60 seconds, 64 KiB transfer blocks, automatic or 16/32/64/128 KiB PC socket buffers, 1-64 MiB warm-up and four parallel streams. The UI offers a narrower set of normal test durations. Actual buffers at both ends are recorded in CSV.
 
 ## Scope and recovery
 

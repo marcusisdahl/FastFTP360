@@ -6,7 +6,7 @@
 
 namespace nb {
 Result::Result() : direction(0), seconds(0), sendBuffer(0), recvBuffer(0), samples(0),
-    bytes(0), microseconds(0), minimum(0), maximum(0) {}
+    bytes(0), microseconds(0), verified(0), minimum(0), maximum(0) {}
 double Result::Rate() const { return microseconds ? double(bytes) / 1.048576 / double(microseconds) : 0; }
 DWORD Read32(const unsigned char* p) { return (DWORD(p[0])<<24)|(DWORD(p[1])<<16)|(DWORD(p[2])<<8)|p[3]; }
 U64 Read64(const unsigned char* p) { return (U64(Read32(p))<<32)|Read32(p+4); }
@@ -57,6 +57,34 @@ bool PrepareListener(SOCKET s, char* error, size_t capacity) {
         _snprintf_s(error,capacity,_TRUNCATE,"LISTENER PORT REUSE FAILED (%d)",code); return false;
     }
     return PrepareSocket(s,error,capacity);
+}
+bool SetSocketBuffers(SOCKET s, int bytes, char* error, size_t capacity) {
+    // Set on the listener before bind/listen; accepted sockets inherit it.
+    if (setsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&bytes),sizeof(bytes))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"LISTENER SEND BUFFER %d KIB FAILED (%d)",bytes/1024,code); return false;
+    }
+    if (setsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<const char*>(&bytes),sizeof(bytes))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"LISTENER RECEIVE BUFFER %d KIB FAILED (%d)",bytes/1024,code); return false;
+    }
+    return true;
+}
+
+// Compares stream bytes [verified, limit) with the repeating pattern. Stream
+// offset `base` is the first byte of `data`; the 32 bytes before it are kept
+// in `tail`, because the newest 32 bytes may be the finish record.
+static bool VerifyStream(const unsigned char* expected,const unsigned char* tail,U64 base,const unsigned char* data,U64& verified,U64 limit) {
+    while(verified<limit) {
+        const unsigned char* source=verified<base ? tail+32-DWORD(base-verified) : data+DWORD(verified-base);
+        U64 available=(verified<base ? base : limit)-verified;
+        if(verified+available>limit) available=limit-verified;
+        DWORD offset=DWORD(verified%Chunk);
+        U64 count=Chunk-offset; if(count>available) count=available;
+        if(memcmp(source,expected+offset,size_t(count))) return false;
+        verified+=count;
+    }
+    return true;
 }
 
 // One worker owns the socket. Cancellation is polled without closing a socket
@@ -134,16 +162,19 @@ static void EncodeResult(unsigned char* wire,const Result& r) {
     Write64(wire+16,r.bytes); Write64(wire+24,r.microseconds);
     Write32(wire+32,DWORD(r.minimum*1024)); Write32(wire+36,DWORD(r.maximum*1024));
     Write32(wire+40,r.sendBuffer); Write32(wire+44,r.recvBuffer); Write32(wire+48,r.samples);
-    Write32(wire+52,IntegrityBytes);
+    Write32(wire+52,IntegrityBytes); Write64(wire+56,r.verified);
 }
 static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigned char* expected) {
     unsigned char request[RequestSize], response[RequestSize]={0};
     if(!c.ReceiveAll(request,RequestSize)) return false;
-    DWORD direction=Read32(request+8),seconds=Read32(request+12),chunk=Read32(request+16),
+    DWORD flags=Read32(request+8),direction=flags&0xFF,seconds=Read32(request+12),chunk=Read32(request+16),
         socketBuffer=Read32(request+20),warmupMiB=Read32(request+24),seed=Read32(request+28);
+    bool verifyAll=(flags&FlagVerifyAll)!=0;
+    // Socket bytes 0 means the PC kept its operating system's automatic buffers.
     bool valid=Read32(request)==Magic && Read32(request+4)==Version && (direction==1 || direction==2) &&
-        seconds>=1 && seconds<=60 && chunk==Chunk && (socketBuffer==16384 || socketBuffer==32768 ||
-        socketBuffer==65536 || socketBuffer==131072) && warmupMiB>=1 && warmupMiB<=64;
+        (flags&~DWORD(FlagVerifyAll|0xFF))==0 && seconds>=1 && seconds<=60 && chunk==Chunk &&
+        (socketBuffer==0 || socketBuffer==16384 || socketBuffer==32768 || socketBuffer==65536 || socketBuffer==131072) &&
+        warmupMiB>=1 && warmupMiB<=64;
     Write32(response,Magic); Write32(response+4,Version); Write32(response+8,valid ? 0 : 1);
     if(!valid) { c.SendAll(response,RequestSize); return c.Stop("Unsupported test request"); }
     // XNet on the tested retail console rejects SO_RCVBUF on an accepted TCP
@@ -180,6 +211,11 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
             if(got==0) break;
             // Retain the stream tail: an explicit finish record distinguishes
             // successful completion from a disconnect/cancel that also sends FIN.
+            if(verifyAll) {
+                U64 total=r.bytes+DWORD(got);
+                if(!VerifyStream(expected,finish,r.bytes,data,r.verified,total>32 ? total-32 : 0))
+                    return c.Stop("Integrity check failed during timed transfer");
+            }
             if(got>=32) memcpy(finish,data+got-32,32);
             else { memmove(finish,finish+got,32-got); memcpy(finish+32-got,data,got); }
             r.bytes+=got;
@@ -208,7 +244,8 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
            Read64(wire+16)!=r.bytes || elapsed==0 || elapsed>180000000 || Read32(wire+52)!=IntegrityBytes)
             return c.Stop("Receiver result did not match transfer");
         r.microseconds=elapsed; r.minimum=double(Read32(wire+32))/1024; r.maximum=double(Read32(wire+36))/1024;
-        r.samples=Read32(wire+48);
+        r.samples=Read32(wire+48); r.verified=Read64(wire+56);
+        if(verifyAll && r.verified!=r.bytes) return c.Stop("Receiver did not verify all data");
     } else {
         U64 sentTime=Read64(finish+24);
         if(r.bytes<=32 || Read32(finish)!=Magic || Read32(finish+4)!=Version || Read32(finish+8)!=direction ||
@@ -216,6 +253,7 @@ static bool Session(SOCKET s,Connection& c,Result& r,unsigned char* data,unsigne
            sentTime<U64(seconds)*1000000 || sentTime>U64(seconds+15)*1000000)
             return c.Stop("Transfer ended without a valid finish record");
         r.bytes-=32;
+        if(verifyAll && r.verified!=r.bytes) return c.Stop("Integrity check did not cover all data");
         if(r.samples==0) r.minimum=r.maximum=r.Rate();
         EncodeResult(wire,r);
         if(!c.SendAll(wire,ResultSize)) return false;

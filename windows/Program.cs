@@ -14,12 +14,12 @@ using System.Windows.Forms;
 namespace NetBench360 {
     sealed class MainForm : Form {
         readonly Color navy=Color.FromArgb(15,23,37), panel=Color.FromArgb(25,37,55), ink=Color.FromArgb(226,235,244), accent=Color.FromArgb(62,217,188);
-        TextBox ip,driver; ComboBox direction,duration,repeats,buffers; Button start,stop,save;
+        TextBox ip,driver; ComboBox direction,duration,repeats,buffers,streams,check; Button start,stop,save;
         Label status,live,upload,download,detail; ProgressBar progress; DataGridView grid;
         readonly List<TestResult> results=new List<TestResult>();
         CancellationTokenSource cancellation; bool running,closeRequested; int testSeconds;
         public MainForm() {
-            Text="NetBench360 v0.1.2 - RAM network benchmark"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
+            Text="NetBench360 v0.2.0 - RAM network benchmark"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
             StartPosition=FormStartPosition.CenterScreen; BackColor=navy; ForeColor=ink; Font=new Font("Segoe UI",10);
             AutoScaleMode=AutoScaleMode.Dpi;
             LabelAt("NETBENCH360",26,20,520,40,24,FontStyle.Bold);
@@ -29,14 +29,16 @@ namespace NetBench360 {
             LabelAt("DIRECTION",464,119,248,22,9); direction=Choice(new[]{"Both directions","PC to Xbox","Xbox to PC"},464,144,248,0);
             LabelAt("DURATION",730,119,128,22,9); duration=Choice(new[]{"10 seconds","20 seconds","30 seconds","60 seconds"},730,144,128,1);
             LabelAt("REPEATS",876,119,146,22,9); repeats=Choice(new[]{"1 per direction","2 per direction","3 per direction","5 per direction"},876,144,146,2);
-            LabelAt("PC SOCKET BUFFERS",28,195,190,22,9); buffers=Choice(new[]{"16 KiB","32 KiB","64 KiB","128 KiB"},28,219,190,2);
-            LabelAt("Xbox requests 64 KiB at startup. Actual buffers are recorded in CSV. Keep settings identical.",236,221,770,28,10);
+            LabelAt("PC SOCKET BUFFERS",28,195,190,22,9); buffers=Choice(new[]{"16 KiB","32 KiB","64 KiB","128 KiB","Windows automatic"},28,219,190,2);
+            LabelAt("TCP STREAMS",236,195,150,22,9); streams=Choice(new[]{"1 stream","2 streams","4 streams"},236,219,150,0);
+            LabelAt("DATA CHECK",404,195,190,22,9); check=Choice(new[]{"First 1 MiB","All data"},404,219,190,0);
+            LabelAt("Set Xbox buffers and worker CPU with the Xbox D-pad. Actual buffers are recorded in CSV.",612,214,410,44,9);
             start=ButtonAt("Start benchmark",28,272,190,accent,navy); start.Click+=Start;
             stop=ButtonAt("Stop",236,272,100,panel,ink); stop.Enabled=false; stop.Click+=(s,e)=>{ if(cancellation!=null) cancellation.Cancel(); status.Text="Stopping..."; };
             save=ButtonAt("Save CSV",878,272,144,panel,ink); save.Enabled=false; save.Click+=Save;
             status=LabelAt("Launch the Xbox app, press A, then enter its IP address here.",28,332,994,30,11);
             live=LabelAt("READY",28,370,410,46,24,FontStyle.Bold);
-            detail=LabelAt("Single TCP stream  /  1 MiB data check  /  32 MiB warm-up",450,380,572,28,10);
+            detail=LabelAt("1 to 4 TCP streams  /  data check  /  32 MiB warm-up",450,380,572,28,10);
             progress=new ProgressBar { Left=28,Top=424,Width=994,Height=7,Style=ProgressBarStyle.Continuous }; Controls.Add(progress);
             upload=LabelAt("PC TO XBOX     -- MiB/s",28,452,480,34,15,FontStyle.Bold);
             download=LabelAt("XBOX TO PC     -- MiB/s",540,452,482,34,15,FontStyle.Bold);
@@ -46,7 +48,7 @@ namespace NetBench360 {
                 SelectionMode=DataGridViewSelectionMode.FullRowSelect,EnableHeadersVisualStyles=false,Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top|AnchorStyles.Bottom };
             grid.ColumnHeadersDefaultCellStyle=new DataGridViewCellStyle { BackColor=panel,ForeColor=ink,Font=new Font("Segoe UI",9,FontStyle.Bold) };
             grid.DefaultCellStyle=new DataGridViewCellStyle { BackColor=navy,ForeColor=ink,SelectionBackColor=Color.FromArgb(42,73,85),SelectionForeColor=Color.White,Font=new Font("Segoe UI",9) };
-            foreach(string name in new[]{"Run","Driver","Direction","Average MiB/s","Low (1s)","High (1s)","Data check"}) grid.Columns.Add(name,name);
+            foreach(string name in new[]{"Run","Driver","Direction","Streams","Average MiB/s","Low (1s)","High (1s)","Data check"}) grid.Columns.Add(name,name);
             grid.Columns[0].FillWeight=40; grid.Columns[2].FillWeight=115; Controls.Add(grid);
             var footer=LabelAt("Rates are receiver-reported. Results stay in memory until you save. Use a trusted local network.",28,696,994,23,9);
             footer.Anchor=AnchorStyles.Bottom|AnchorStyles.Left;
@@ -74,7 +76,7 @@ namespace NetBench360 {
         }); }
         void SetRunning(bool value) {
             running=value; start.Enabled=!value; stop.Enabled=value; save.Enabled=!value && results.Count>0;
-            foreach(Control c in new Control[]{ip,driver,direction,duration,repeats,buffers}) c.Enabled=!value;
+            foreach(Control c in new Control[]{ip,driver,direction,duration,repeats,buffers,streams,check}) c.Enabled=!value;
         }
         async void Start(object sender,EventArgs args) {
             IPAddress parsed;
@@ -82,16 +84,16 @@ namespace NetBench360 {
                 status.Text="Enter the IPv4 address shown on the Xbox, for example 192.168.1.50."; ip.Focus(); return;
             }
             string address=parsed.ToString(),label=driver.Text.Trim(); int selected=direction.SelectedIndex;
-            int count=new[]{1,2,3,5}[repeats.SelectedIndex],size=new[]{16384,32768,65536,131072}[buffers.SelectedIndex];
+            int count=new[]{1,2,3,5}[repeats.SelectedIndex],size=new[]{16384,32768,65536,131072,0}[buffers.SelectedIndex];
+            int streamCount=new[]{1,2,4}[streams.SelectedIndex]; bool verifyAll=check.SelectedIndex==1;
             testSeconds=new[]{10,20,30,60}[duration.SelectedIndex]; cancellation=new CancellationTokenSource(); SetRunning(true);
             try {
                 await Task.Run(()=>{
                     for(int run=1;run<=count;run++) foreach(int mode in selected==0 ? new[]{1,2} : new[]{selected}) {
                         cancellation.Token.ThrowIfCancellationRequested();
-                        using(var engine=new Engine(cancellation.Token,UpdateProgress)) {
-                            var result=engine.Run(address,36020,mode,testSeconds,size,32); result.Driver=label; result.Run=run;
-                            Ui(()=>AddResult(result));
-                        }
+                        var result=RunBatch(address,mode,testSeconds,size,verifyAll,streamCount,cancellation.Token);
+                        result.Driver=label; result.Run=run;
+                        Ui(()=>AddResult(result));
                     }
                 });
                 status.Text="All requested tests completed. Save CSV to keep these results.";
@@ -99,12 +101,55 @@ namespace NetBench360 {
               catch(Exception e) { status.Text="Test stopped: "+e.Message; live.Text="CHECK CONNECTION"; }
             finally { SetRunning(false); cancellation.Dispose(); cancellation=null; if(closeRequested) Close(); }
         }
+        // Runs one test over several parallel TCP connections. Every stream is a
+        // normal protocol v1 session; their timed phases start together and the
+        // combined result is total payload over the longest receiver time.
+        TestResult RunBatch(string address,int mode,int seconds,int size,bool verifyAll,int streamCount,CancellationToken token) {
+            if(streamCount==1) using(var engine=new Engine(token,UpdateProgress)) return engine.Run(address,36020,mode,seconds,size,32,verifyAll);
+            var latest=new Update[streamCount];
+            using(var linked=CancellationTokenSource.CreateLinkedTokenSource(token)) using(var barrier=new Barrier(streamCount)) {
+                var tasks=new Task<TestResult>[streamCount];
+                for(int i=0;i<streamCount;i++) {
+                    int index=i;
+                    Action<Update> progress=u=>{
+                        Update total;
+                        lock(latest) {
+                            latest[index]=u; total=new Update { Phase=u.Phase,Direction=u.Direction };
+                            foreach(var x in latest) if(x!=null) { total.Bytes+=x.Bytes; total.Rate+=x.Rate; total.Seconds=Math.Max(total.Seconds,x.Seconds); }
+                        }
+                        UpdateProgress(total);
+                    };
+                    tasks[i]=Task.Factory.StartNew(()=>{
+                        try { using(var engine=new Engine(linked.Token,progress))
+                            return engine.Run(address,36020,mode,seconds,size,32,verifyAll,()=>barrier.SignalAndWait(linked.Token)); }
+                        catch { linked.Cancel(); throw; }
+                    },TaskCreationOptions.LongRunning);
+                }
+                try { Task.WaitAll(tasks); }
+                catch(AggregateException e) {
+                    token.ThrowIfCancellationRequested();
+                    Exception first=e.Flatten().InnerExceptions.FirstOrDefault(x=>!(x is OperationCanceledException));
+                    if(first!=null) throw first;
+                    throw new OperationCanceledException();
+                }
+                var parts=tasks.Select(t=>t.Result).ToArray(); var r=parts[0];
+                var combined=new TestResult { Direction=mode,RequestedSeconds=seconds,RequestedBuffer=size,Address=address,Utc=r.Utc,
+                    PcSendBuffer=r.PcSendBuffer,PcRecvBuffer=r.PcRecvBuffer,XboxSendBuffer=r.XboxSendBuffer,XboxRecvBuffer=r.XboxRecvBuffer,
+                    Streams=streamCount,VerifyAll=verifyAll };
+                foreach(var p in parts) {
+                    combined.Bytes+=p.Bytes; combined.Verified+=p.Verified; combined.Microseconds=Math.Max(combined.Microseconds,p.Microseconds);
+                    combined.Minimum+=p.Minimum; combined.Maximum+=p.Maximum;
+                    combined.Samples=combined.Samples==0 ? p.Samples : Math.Min(combined.Samples,p.Samples);
+                }
+                return combined;
+            }
+        }
         void AddResult(TestResult r) {
-            results.Add(r); grid.Rows.Add(r.Run,r.Driver,r.DirectionText,r.Rate.ToString("F2"),r.Minimum.ToString("F2"),r.Maximum.ToString("F2"),"1 MiB passed");
+            results.Add(r); grid.Rows.Add(r.Run,r.Driver,r.DirectionText,r.Streams,r.Rate.ToString("F2"),r.Minimum.ToString("F2"),r.Maximum.ToString("F2"),r.VerifyAll ? "All data passed" : "1 MiB passed");
             if(grid.Rows.Count>0) grid.FirstDisplayedScrollingRowIndex=grid.Rows.Count-1;
             // Summarize only the same labeled configuration, never blend driver builds.
             foreach(int mode in new[]{1,2}) {
-                double[] rates=results.Where(x=>x.Direction==mode && x.Address==r.Address && x.Driver==r.Driver && x.RequestedBuffer==r.RequestedBuffer && x.RequestedSeconds==r.RequestedSeconds).Select(x=>x.Rate).OrderBy(x=>x).ToArray();
+                double[] rates=results.Where(x=>x.Direction==mode && x.Address==r.Address && x.Driver==r.Driver && x.RequestedBuffer==r.RequestedBuffer && x.RequestedSeconds==r.RequestedSeconds && x.Streams==r.Streams).Select(x=>x.Rate).OrderBy(x=>x).ToArray();
                 double median=rates.Length==0 ? 0 : (rates[(rates.Length-1)/2]+rates[rates.Length/2])/2;
                 (mode==1 ? upload : download).Text=(mode==1 ? "PC TO XBOX     " : "XBOX TO PC     ")+(rates.Length==0 ? "--" : median.ToString("F2"))+" MiB/s median";
             }
@@ -113,8 +158,8 @@ namespace NetBench360 {
         void Save(object sender,EventArgs args) {
             using(var dialog=new SaveFileDialog { Filter="CSV results (*.csv)|*.csv",FileName="NetBench360-"+DateTime.Now.ToString("yyyyMMdd-HHmm")+".csv" }) {
                 if(dialog.ShowDialog()!=DialogResult.OK) return;
-                var lines=new List<string> { "utc,driver_label,xbox_ip,run,direction,requested_seconds,receiver_bytes,receiver_seconds,average_MiB_s,min_1s_MiB_s,max_1s_MiB_s,full_sample_count,integrity_bytes,requested_socket_bytes,pc_send_bytes,pc_receive_bytes,xbox_send_bytes,xbox_receive_bytes,warmup_MiB" };
-                foreach(var r in results) lines.Add(String.Join(",",new object[]{r.Utc,r.Driver,r.Address,r.Run,r.DirectionText,r.RequestedSeconds,r.Bytes,r.Microseconds/1000000.0,r.Rate,r.Minimum,r.Maximum,r.Samples,1048576,r.RequestedBuffer,r.PcSendBuffer,r.PcRecvBuffer,r.XboxSendBuffer,r.XboxRecvBuffer,32}.Select(Csv)));
+                var lines=new List<string> { "utc,driver_label,xbox_ip,run,direction,requested_seconds,receiver_bytes,receiver_seconds,average_MiB_s,min_1s_MiB_s,max_1s_MiB_s,full_sample_count,integrity_bytes,requested_socket_bytes,pc_send_bytes,pc_receive_bytes,xbox_send_bytes,xbox_receive_bytes,warmup_MiB,streams,verified_bytes" };
+                foreach(var r in results) lines.Add(String.Join(",",new object[]{r.Utc,r.Driver,r.Address,r.Run,r.DirectionText,r.RequestedSeconds,r.Bytes,r.Microseconds/1000000.0,r.Rate,r.Minimum,r.Maximum,r.Samples,1048576,r.RequestedBuffer,r.PcSendBuffer,r.PcRecvBuffer,r.XboxSendBuffer,r.XboxRecvBuffer,32,r.Streams,r.Verified}.Select(Csv)));
                 try { File.WriteAllLines(dialog.FileName,lines,new UTF8Encoding(true)); status.Text="Saved "+results.Count+" completed results."; }
                 catch(Exception e) { status.Text="Could not save: "+e.Message; }
             }

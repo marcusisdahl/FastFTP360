@@ -1,5 +1,15 @@
 # Changes
 
+## 0.2.0
+
+- Optional full data check: the receiver compares every timed byte with the pattern (PC "Data check: All data").
+- Parallel TCP streams: the PC can run 1, 2 or 4 connections at once; the Xbox serves each on its own thread and shows their combined rate. Streams start their timed phase together.
+- PC "Windows automatic" socket buffers keep receive-window autotuning on.
+- Xbox D-pad settings while stopped: listener socket buffers (startup 64 KiB, 128 KiB, 256 KiB) and the hardware thread for stream workers.
+- CSV adds `streams` and `verified_bytes`.
+
+Protocol v1 stays compatible for existing settings. The new data check, automatic PC buffers and parallel streams need the v0.2.0 Xbox XEX.
+
 ## 0.1.2
 
 - Avoid receive-buffer setup error 10022 by keeping accepted sockets' buffers instead of resizing them; report their actual sizes.

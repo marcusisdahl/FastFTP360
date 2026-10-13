@@ -2,7 +2,7 @@
 
 All fields are unsigned **big endian**, including the 64-bit counters. A connection contains one test. Direction 1 means PC sends, Xbox receives; direction 2 means Xbox sends, PC receives. Single TCP stream, port 36020.
 
-The 32-byte request contains eight uint32 fields: magic `0x4E423336`, version `1`, direction, duration seconds, chunk bytes `65536`, requested socket bytes, warm-up MiB, and pattern seed. Allowed duration 1-60, buffers 16384/32768/65536/131072, warm-up 1-64. Reject unsupported fields before allocating large or unbounded resources.
+The 32-byte request contains eight uint32 fields: magic `0x4E423336`, version `1`, direction, duration seconds, chunk bytes `65536`, requested socket bytes, warm-up MiB, and pattern seed. Allowed duration 1-60, buffers 0/16384/32768/65536/131072 (0 means the PC kept its automatic buffers), warm-up 1-64. The direction field's low byte is the direction; bit `0x100` asks the receiver to check every timed payload byte against the pattern. Other bits must be zero. Reject unsupported fields before allocating large or unbounded resources.
 
 As of application v0.1.2, requested socket bytes describe the PC setting. The Xbox does not resize an accepted socket: it requests 64 KiB defaults at XNet startup and reports actual send/receive sizes in the response. This preserves protocol v1 compatibility; clients must use actual sizes rather than assuming the Xbox honored the PC request.
 
@@ -37,8 +37,10 @@ The receiver retains the final 32 stream bytes until EOF. It validates the recor
 | 44 | 4 | Xbox actual receive buffer |
 | 48 | 4 | Full interval sample count |
 | 52 | 4 | Integrity bytes, 1048576 |
-| 56 | 8 | Reserved, zero |
+| 56 | 8 | Timed payload bytes checked against the pattern; zero unless the full data check was requested |
 
-The sender validates result magic/version/direction/status, equal payload bytes, nonzero elapsed time no more than 180 seconds, and integrity phase size. Its displayed final average uses the receiver's result. Local live rate while sending is provisional. All partial TCP reads/writes are handled; cancellation is polled at most every 100 ms while waiting. One worker owns the socket throughout its lifetime.
+The sender validates result magic/version/direction/status, equal payload bytes, nonzero elapsed time no more than 180 seconds, and integrity phase size. Its displayed final average uses the receiver's result. Local live rate while sending is provisional. All partial TCP reads/writes are handled; cancellation is polled at most every 100 ms while waiting. One worker owns the socket throughout its lifetime. When the full data check was requested, the sender also requires the checked byte count to equal the payload count.
+
+A client may open up to four connections at once; each is an independent session. The Xbox app serves them in parallel and shows their summed receiver rates. The Windows app starts every stream's timed phase together by holding its warm-up ACK (as receiver) or its first timed block (as sender) until all streams are ready.
 
 This is a diagnostic protocol for cooperating trusted peers. It is not authenticated, and byte-count agreement or a finish record is not cryptographic proof of valid payload.

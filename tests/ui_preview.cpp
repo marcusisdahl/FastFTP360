@@ -11,7 +11,8 @@ static void Rectangle(void*,int x,int y,int w,int h,unsigned int color) {
 int main(int argc,char** argv) {
     nb::UiState state;
     strcpy_s(state.ip,"192.168.1.50"); state.armed=1;
-    if(argc>2) { state.phase=5; state.direction=1; state.rate=27.48; state.upload=27.34; state.download=24.16; state.elapsed=12.4; state.mebibytes=340.752; }
+    strcpy_s(state.settings,"XBOX BUFFERS: STARTUP 64 KIB / WORKER CPU: AUTO");
+    if(argc>2) { state.phase=5; state.direction=1; state.rate=27.48; state.upload=27.34; state.download=24.16; state.elapsed=12.4; state.mebibytes=340.752; state.streams=2; }
     else state.phase=1;
     nb::DrawUi(state,Rectangle,NULL);
     BITMAPFILEHEADER file={0}; BITMAPINFOHEADER info={0};

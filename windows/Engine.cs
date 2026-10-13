@@ -8,8 +8,9 @@ using System.Threading;
 namespace NetBench360 {
     public sealed class TestResult {
         public string Driver, Address, Utc;
-        public int Direction, Run, RequestedSeconds, RequestedBuffer, PcSendBuffer, PcRecvBuffer, XboxSendBuffer, XboxRecvBuffer;
-        public ulong Bytes, Microseconds;
+        public int Direction, Run, RequestedSeconds, RequestedBuffer, PcSendBuffer, PcRecvBuffer, XboxSendBuffer, XboxRecvBuffer, Streams=1;
+        public ulong Bytes, Microseconds, Verified;
+        public bool VerifyAll;
         public uint Samples;
         public double Minimum, Maximum;
         public double Rate { get { return Microseconds == 0 ? 0 : Bytes / 1.048576 / Microseconds; } }
@@ -21,6 +22,7 @@ namespace NetBench360 {
     public sealed class Engine : IDisposable {
         const uint Magic=0x4e423336, Version=1;
         const int Chunk=65536, Integrity=1048576;
+        public const uint FlagVerifyAll=0x100;
         readonly Socket socket;
         readonly CancellationToken cancel;
         readonly Action<Update> update;
@@ -86,7 +88,21 @@ namespace NetBench360 {
                 }
                 at+=count; }
         }
-        void FixedTransfer(bool sender,byte[] expected,byte[] buffer,int bytes,bool verify) {
+        // Compares stream bytes [verified, limit) with the repeating pattern. Stream
+        // offset 'at' is buffer[0]; the 32 bytes before it are kept in 'tail'.
+        static bool VerifyStream(byte[] expected,byte[] tail,ulong at,byte[] buffer,ref ulong verified,ulong limit) {
+            while(verified<limit) {
+                byte[] source; int index; ulong available;
+                if(verified<at) { source=tail; index=32-(int)(at-verified); available=at-verified; }
+                else { source=buffer; index=(int)(verified-at); available=limit-verified; }
+                if(verified+available>limit) available=limit-verified;
+                int offset=(int)(verified%Chunk); int count=(int)Math.Min((ulong)(Chunk-offset),available);
+                for(int i=0;i<count;i++) if(source[index+i]!=expected[offset+i]) return false;
+                verified+=(ulong)count;
+            }
+            return true;
+        }
+        void FixedTransfer(bool sender,byte[] expected,byte[] buffer,int bytes,bool verify,Action ready=null) {
             for(int at=0;at<bytes;at+=Chunk) {
                 if(sender) SendAll(expected,Chunk);
                 else {
@@ -96,18 +112,22 @@ namespace NetBench360 {
                 }
             }
             byte[] ack=new byte[4];
-            if(sender) { ReceiveAll(ack); if(Read32(ack,0)!=0) throw new InvalidOperationException("The receiver rejected the data check."); }
-            else SendAll(ack,4);
+            // 'ready' lets parallel streams start their timed phase together: the
+            // sender waits after the receiver's ACK, the receiver before sending it.
+            if(sender) { ReceiveAll(ack); if(Read32(ack,0)!=0) throw new InvalidOperationException("The receiver rejected the data check."); if(ready!=null) ready(); }
+            else { if(ready!=null) ready(); SendAll(ack,4); }
         }
-        public TestResult Run(string address,int port,int direction,int seconds,int bufferSize,int warmupMiB) {
+        // bufferSize 0 keeps Windows' automatic socket buffers (receive window
+        // autotuning stays on). verifyAll checks every timed byte at the receiver.
+        public TestResult Run(string address,int port,int direction,int seconds,int bufferSize,int warmupMiB,bool verifyAll=false,Action beforeMeasure=null) {
             if(direction<1 || direction>2 || seconds<1 || seconds>60 || warmupMiB<1 || warmupMiB>64 ||
-                (bufferSize!=16384 && bufferSize!=32768 && bufferSize!=65536 && bufferSize!=131072))
+                (bufferSize!=0 && bufferSize!=16384 && bufferSize!=32768 && bufferSize!=65536 && bufferSize!=131072))
                 throw new ArgumentException("Unsupported benchmark settings.");
             Notify("Connecting",direction,0,0,0);
             IPAddress ip=IPAddress.Parse(address);
             if(ip.AddressFamily!=AddressFamily.InterNetwork) throw new ArgumentException("Use an IPv4 address.");
             // Apply buffer preferences before connection establishment.
-            socket.SendBufferSize=bufferSize; socket.ReceiveBufferSize=bufferSize;
+            if(bufferSize!=0) { socket.SendBufferSize=bufferSize; socket.ReceiveBufferSize=bufferSize; }
             IAsyncResult connecting=socket.BeginConnect(new IPEndPoint(ip,port),null,null);
             using(WaitHandle wait=connecting.AsyncWaitHandle) {
                 while(!wait.WaitOne(100)) {
@@ -120,7 +140,7 @@ namespace NetBench360 {
             lastActivity=session.Elapsed.TotalSeconds;
             uint seed=unchecked((uint)Environment.TickCount) ^ 0x360179u;
             byte[] request=new byte[32];
-            uint[] fields={Magic,Version,(uint)direction,(uint)seconds,Chunk,(uint)bufferSize,(uint)warmupMiB,seed};
+            uint[] fields={Magic,Version,(uint)direction|(verifyAll ? FlagVerifyAll : 0u),(uint)seconds,Chunk,(uint)bufferSize,(uint)warmupMiB,seed};
             for(int i=0;i<fields.Length;i++) Write32(request,4*i,fields[i]);
             Notify("Negotiating",direction,0,0,0);
             SendAll(request,32); byte[] response=new byte[32]; ReceiveAll(response);
@@ -128,12 +148,12 @@ namespace NetBench360 {
                 Read32(response,12)!=Chunk || Read32(response,24)!=Integrity || Read32(response,28)!=warmupMiB)
                 throw new InvalidOperationException("The Xbox rejected the request, or is running a different protocol version.");
             TestResult result=new TestResult { Direction=direction,RequestedSeconds=seconds,RequestedBuffer=bufferSize,
-                Address=address,Utc=DateTime.UtcNow.ToString("o"),PcSendBuffer=socket.SendBufferSize,PcRecvBuffer=socket.ReceiveBufferSize,
+                Address=address,Utc=DateTime.UtcNow.ToString("o"),VerifyAll=verifyAll,PcSendBuffer=socket.SendBufferSize,PcRecvBuffer=socket.ReceiveBufferSize,
                 XboxSendBuffer=(int)Read32(response,16),XboxRecvBuffer=(int)Read32(response,20) };
             bool sender=direction==1;
             byte[] expected=Pattern(seed),buffer=new byte[Chunk];
             Notify("Checking data",direction,0,0,0); FixedTransfer(sender,expected,buffer,Integrity,true);
-            Notify("Warming up",direction,0,0,0); FixedTransfer(sender,expected,buffer,warmupMiB*1048576,false);
+            Notify("Warming up",direction,0,0,0); FixedTransfer(sender,expected,buffer,warmupMiB*1048576,false,beforeMeasure);
             Notify("Measuring",direction,0,0,0);
             Stopwatch timed=Stopwatch.StartNew(); double lastSample=0,lastUpdate=0,currentRate=0; ulong sampleBytes=0;
             byte[] finish=new byte[32];
@@ -143,6 +163,11 @@ namespace NetBench360 {
                     SendAll(expected,Chunk); result.Bytes+=Chunk;
                 } else {
                     int got=Receive(buffer,0,Chunk); if(got==0) break;
+                    if(verifyAll) {
+                        ulong total=result.Bytes+(ulong)got;
+                        if(!VerifyStream(expected,finish,result.Bytes,buffer,ref result.Verified,total>32 ? total-32 : 0))
+                            throw new InvalidOperationException("Data integrity check FAILED during the timed transfer. Stop testing this driver build.");
+                    }
                     if(got>=32) Buffer.BlockCopy(buffer,got-32,finish,0,32);
                     else { Buffer.BlockCopy(finish,got,finish,0,32-got); Buffer.BlockCopy(buffer,0,finish,32-got,got); }
                     result.Bytes+=(uint)got;
@@ -169,7 +194,8 @@ namespace NetBench360 {
                     Read64(wire,16)!=result.Bytes || elapsed==0 || elapsed>180000000 || Read32(wire,52)!=Integrity)
                     throw new InvalidOperationException("Receiver totals did not match the transfer.");
                 result.Microseconds=elapsed; result.Minimum=Read32(wire,32)/1024.0; result.Maximum=Read32(wire,36)/1024.0;
-                result.Samples=Read32(wire,48);
+                result.Samples=Read32(wire,48); result.Verified=Read64(wire,56);
+                if(verifyAll && result.Verified!=result.Bytes) throw new InvalidOperationException("The Xbox did not check all data. Use the updated Xbox XEX.");
             } else {
                 ulong sentTime=Read64(finish,24);
                 if(result.Bytes<=32 || Read32(finish,0)!=Magic || Read32(finish,4)!=Version || Read32(finish,8)!=direction ||
@@ -177,12 +203,13 @@ namespace NetBench360 {
                     sentTime<(ulong)seconds*1000000 || sentTime>(ulong)(seconds+15)*1000000)
                     throw new InvalidOperationException("Transfer ended without a valid finish record.");
                 result.Bytes-=32;
+                if(verifyAll && result.Verified!=result.Bytes) throw new InvalidOperationException("The data check did not cover the whole transfer.");
                 if(result.Samples==0) result.Minimum=result.Maximum=result.Rate;
                 Write32(wire,0,Magic); Write32(wire,4,Version); Write32(wire,8,(uint)direction);
                 Write64(wire,16,result.Bytes); Write64(wire,24,result.Microseconds);
                 Write32(wire,32,(uint)(result.Minimum*1024)); Write32(wire,36,(uint)(result.Maximum*1024));
                 Write32(wire,40,(uint)result.XboxSendBuffer); Write32(wire,44,(uint)result.XboxRecvBuffer);
-                Write32(wire,48,result.Samples); Write32(wire,52,Integrity); SendAll(wire,64);
+                Write32(wire,48,result.Samples); Write32(wire,52,Integrity); Write64(wire,56,result.Verified); SendAll(wire,64);
             }
             Notify("Complete",direction,result.Bytes,result.Microseconds/1000000.0,result.Rate);
             return result;

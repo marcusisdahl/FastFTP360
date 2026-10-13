@@ -66,12 +66,14 @@ def server(count=1, lan_shim=False, fixed_port=None):
         process.wait(timeout=3)
 
 
-def client(port, direction=1, seconds=1, cancel=None, buffer=None):
+def client(port, direction=1, seconds=1, cancel=None, buffer=None, verify=False):
     args = [str(ROOT / "build/host/client-cli.exe"), str(port), str(direction), str(seconds)]
-    if cancel is not None or buffer is not None:
+    if cancel is not None or buffer is not None or verify:
         args.append(str(cancel if cancel is not None else -1))
-    if buffer is not None:
-        args.append(str(buffer))
+    if buffer is not None or verify:
+        args.append(str(buffer if buffer is not None else 65536))
+    if verify:
+        args.append("verify")
     return subprocess.run(args, text=True, capture_output=True, timeout=25, creationflags=subprocess.CREATE_NO_WINDOW)
 
 
@@ -83,6 +85,9 @@ def connect(port):
 
 def request(mode=1):
     return [MAGIC, 1, mode, 1, CHUNK, CHUNK, 1, 123]
+
+
+VERIFY_ALL = 0x100
 
 
 for mode in (1, 2):
@@ -100,13 +105,36 @@ for mode in (1, 2):
         check("direction %d works when LAN and buffer changes on accepted sockets are rejected" % mode,
               result.returncode == 0 and result.stdout.strip() == output.strip() and "PASS" in output)
 
-for buffer in (16384, 32768, 65536, 131072):
+for buffer in (0, 16384, 32768, 65536, 131072):
     for mode in (1, 2):
         with server(lan_shim=True) as (port, host):
             result = client(port, mode, buffer=buffer)
             output = host.communicate(timeout=5)[0]
             check("PC buffer %d / direction %d with fixed server buffers and accurate metadata" % (buffer, mode),
                   result.returncode == 0 and "PASS" in output)
+
+for mode in (1, 2):
+    with server() as (port, host):
+        result = client(port, mode, 2, verify=True)
+        output = host.communicate(timeout=5)[0]
+        lines = result.stdout.strip().splitlines()
+        verified = lines[-1].split() if lines else []
+        check("direction %d verifies every timed byte at the receiver" % mode,
+              result.returncode == 0 and "PASS" in output and len(verified) == 4 and verified[0] == "VERIFIED" and
+              verified[1] == verified[3] and int(verified[1]) > 0)
+
+with server(2) as (port, host):
+    runs = [None, None]
+    def parallel_client(index, mode):
+        runs[index] = client(port, mode, 2)
+    workers = [threading.Thread(target=parallel_client, args=(i, mode)) for i, mode in enumerate((1, 1))]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(30)
+    output = host.communicate(timeout=5)[0]
+    check("two parallel streams complete on one listener",
+          all(r is not None and r.returncode == 0 for r in runs) and output.count("PASS") == 2)
 
 restart_port = free_port()
 for run in (1, 2):
@@ -122,7 +150,8 @@ with server(2) as (port, host):
     check("cancel discards incomplete run and next connection succeeds",
           cancelled.returncode == 2 and retry.returncode == 0 and output.startswith("ERROR") and "PASS" in output)
 
-for field, value in ((0, 0), (1, 99), (2, 3), (3, 0), (3, 61), (4, 1), (5, 0), (6, 0), (6, 65)):
+for field, value in ((0, 0), (1, 99), (2, 3), (2, 0x201), (2, VERIFY_ALL), (3, 0), (3, 61), (4, 1), (5, 1),
+                     (6, 0), (6, 65)):
     with server() as (port, host), connect(port) as s:
         fields = request()
         fields[field] = value
@@ -169,6 +198,22 @@ with server() as (port, host), connect(port) as s:
         pass
     s.sendall(b"\0" * 64)
     check("server rejects forged receiver result", "Receiver result did not match" in host.communicate(timeout=5)[0])
+
+
+with server() as (port, host), connect(port) as s:
+    fields = request()
+    fields[2] = 1 | VERIFY_ALL
+    s.sendall(struct.pack(">8I", *fields))
+    exact(s, 32)
+    block = pattern(123)
+    for _ in range(2):
+        for _ in range(16):
+            s.sendall(block)
+        assert exact(s, 4) == b"\0" * 4
+    s.sendall(block)
+    s.sendall(block[:1000] + bytes([block[1000] ^ 1]) + block[1001:])
+    output = host.communicate(timeout=5)[0]
+    check("full data check rejects one corrupt timed byte", "Integrity check failed during timed transfer" in output)
 
 
 def stub_test(name, handler, mode, expected):

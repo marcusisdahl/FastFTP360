@@ -11,11 +11,14 @@
 namespace nb {
 typedef unsigned __int64 U64;
 enum { Port = 36020, Magic = 0x4E423336, Version = 1, Chunk = 65536,
-       IntegrityBytes = 1048576, RequestSize = 32, ResultSize = 64 };
+       IntegrityBytes = 1048576, RequestSize = 32, ResultSize = 64,
+       // Request direction field: low byte is the direction, this bit asks the
+       // receiver to compare every timed payload byte with the pattern.
+       FlagVerifyAll = 0x100, MaxStreams = 4 };
 enum Phase { Idle, Listening, Connecting, Verifying, Warming, Measuring, Complete, Failed, Stopped };
 struct Result {
     DWORD direction, seconds, sendBuffer, recvBuffer, samples;
-    U64 bytes, microseconds;
+    U64 bytes, microseconds, verified;
     double minimum, maximum;
     Result();
     double Rate() const;
@@ -34,6 +37,7 @@ void Pattern(unsigned char* p, DWORD seed);
 double Now();
 bool PrepareSocket(SOCKET s, char* error, size_t capacity);
 bool PrepareListener(SOCKET s, char* error, size_t capacity);
+bool SetSocketBuffers(SOCKET s, int bytes, char* error, size_t capacity);
 bool Serve(SOCKET s, const Observer& observer, Result& result, char* error, size_t capacity);
 const char* PhaseName(Phase phase);
 }

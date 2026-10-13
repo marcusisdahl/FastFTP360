@@ -1,3 +1,9 @@
+# v0.2.0 validation
+
+`tests/protocol.py` now has 41 checks. New ones cover the full data check in both directions (every timed byte counted), a single flipped timed byte being rejected, two parallel streams on one listener, the automatic PC buffer setting in both directions, and rejection of unknown direction-field flags.
+
+These were run on a Linux loopback stand-in (POSIX socket shim for the C++ session, Mono for the C# engine) because no Windows host was available: all 41 passed. A four-stream run of the Windows app's batch logic, with the full data check, also passed in both directions. The Windows and Xbox builds, the Xbox multi-stream screen, D-pad settings, worker pinning, and XNet's response to larger listener buffers are **not yet verified**.
+
 # v0.1.2 validation
 
 Built on Windows using VS 2022 Community with installed RXDK-360 integration, Xbox PowerPC compiler 16.00.11886.00, and .NET Framework C# compiler. Xbox build succeeds with `DEVKIT_ONLY=0`. Deployment is excluded in the project.

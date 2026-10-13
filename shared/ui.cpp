@@ -4,8 +4,8 @@
 #include <string.h>
 #include <ctype.h>
 namespace nb {
-UiState::UiState() : phase(0),direction(0),duration(20),armed(0),completed(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0) {
-    strcpy_s(ip,"WAITING FOR NETWORK"); message[0]=0;
+UiState::UiState() : phase(0),direction(0),duration(20),armed(0),completed(0),streams(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0) {
+    strcpy_s(ip,"WAITING FOR NETWORK"); message[0]=0; settings[0]=0;
 }
 // Original compact bitmap lettering. No external font or SDK media assets.
 static const char Alphabet[]=" ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.:/-()%+?";
@@ -49,7 +49,7 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     const unsigned int bg=0xFF0F1725,card=0xFF192537,white=0xFFE2EBF4,muted=0xFF8FA6BA,green=0xFF3ED9BC,blue=0xFF73B8FF;
     Painter p(rectangle,context); char text[128];
     p.Box(0,0,1280,720,bg); p.Box(56,48,7,44,green);
-    p.Text("NETBENCH360",80,52,5,white); p.Text("RAM NETWORK BENCHMARK / V0.1.2",80,105,2,muted);
+    p.Text("NETBENCH360",80,52,5,white); p.Text("RAM NETWORK BENCHMARK / V0.2.0",80,105,2,muted);
     p.Text("XBOX IP",832,53,2,muted); p.Text(s.ip,832,78,2,white,30);
     p.Text("PORT 36020",832,107,2,muted);
     p.Box(56,163,564,132,card); p.Box(660,163,564,132,card);
@@ -63,7 +63,9 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     if(s.direction) p.Text(s.direction==1 ? "PC TO XBOX" : "XBOX TO PC",880,342,2,muted);
     if(s.phase==5 || s.phase==6) {
         _snprintf_s(text,sizeof(text),_TRUNCATE,"%.2f MIB/S",s.rate); p.Text(text,56,382,4,white);
-        _snprintf_s(text,sizeof(text),_TRUNCATE,"%.1f SEC / %.1f MIB",s.elapsed,s.mebibytes); p.Text(text,640,394,2,muted);
+        if(s.streams>1) _snprintf_s(text,sizeof(text),_TRUNCATE,"%.1f SEC / %.1f MIB / %d STREAMS",s.elapsed,s.mebibytes,s.streams);
+        else _snprintf_s(text,sizeof(text),_TRUNCATE,"%.1f SEC / %.1f MIB",s.elapsed,s.mebibytes);
+        p.Text(text,640,394,2,muted);
     } else {
         p.Text(s.armed ? "START THE TEST IN THE WINDOWS APP." : "PRESS A TO ALLOW A PC TO CONNECT.",56,391,2,white);
     }
@@ -72,9 +74,10 @@ void DrawUi(const UiState& s,Rectangle rectangle,void* context) {
     if(fraction>1) fraction=1; if(fraction<0) fraction=0;
     if(fraction>0) p.Box(56,447,int(1168*fraction),8,green);
     if(s.message[0]) p.Text(s.message,56,489,2,s.phase==7?0xFFFFAC8B:white,94);
-    else p.Text("ONE TCP STREAM / DATA CHECK / WARM-UP / TIMED TRANSFER",56,489,2,muted);
-    p.Text("RESULTS ABOVE ARE THE LATEST COMPLETED RUN IN EACH DIRECTION.",56,532,2,muted);
-    p.Text("SAVE REPEATS AND MEDIANS FROM THE WINDOWS APP.",56,563,2,muted);
+    else p.Text("UP TO 4 TCP STREAMS / DATA CHECK / WARM-UP / TIMED TRANSFER",56,489,2,muted);
+    p.Text("RESULTS ABOVE ARE THE LATEST COMPLETED RUN IN EACH DIRECTION.",56,520,2,muted);
+    p.Text(s.settings,56,551,2,white,94);
+    p.Text(s.armed ? "STOP WITH B TO CHANGE SETTINGS." : "D-PAD UP/DOWN: XBOX BUFFERS   LEFT/RIGHT: WORKER CPU",56,582,2,muted);
     p.Box(56,620,1168,2,card);
     p.Text(s.armed ? "A  LISTENING" : "A  START",56,649,2,green);
     p.Text("B  STOP",380,649,2,white); p.Text("BACK  EXIT WHEN STOPPED",688,649,2,muted);

@@ -2,8 +2,8 @@
 #pragma once
 namespace nb {
 struct UiState {
-    char ip[48],message[100];
-    int phase,direction,duration,armed,completed;
+    char ip[48],message[100],settings[80];
+    int phase,direction,duration,armed,completed,streams;
     double elapsed,rate,upload,download,mebibytes;
     UiState();
 };
