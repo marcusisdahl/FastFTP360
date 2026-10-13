@@ -14,7 +14,7 @@
   <ItemDefinitionGroup>
     <ClCompile><Optimization>Full</Optimization><FavorSizeOrSpeed>Speed</FavorSizeOrSpeed><WarningLevel>Level4</WarningLevel>
       <PrecompiledHeader>NotUsing</PrecompiledHeader><RuntimeLibrary>MultiThreaded</RuntimeLibrary><ExceptionHandling>false</ExceptionHandling>
-      <PreprocessorDefinitions>NDEBUG;_XBOX;DEVKIT_ONLY=0;%(PreprocessorDefinitions)</PreprocessorDefinitions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PreprocessorDefinitions>NDEBUG;_XBOX;DEVKIT_ONLY=0;IMGUI_USE_BGRA_PACKED_COLOR;IMGUI_DISABLE_FILE_FUNCTIONS;IMGUI_DISABLE_WIN32_FUNCTIONS;IMGUI_DISABLE_DEMO_WINDOWS;IMGUI_DISABLE_METRICS_WINDOW;%(PreprocessorDefinitions)</PreprocessorDefinitions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ProgramDataBaseFileName>$(IntDir)compiler.pdb</ProgramDataBaseFileName><FunctionLevelLinking>true</FunctionLevelLinking><StringPooling>true</StringPooling>
     </ClCompile>
     <Link><OutputFile>$(OutDir)NetBench360.exe</OutputFile><GenerateDebugInformation>true</GenerateDebugInformation>
@@ -24,7 +24,8 @@
     <ImageXex><ConfigurationFile>$(ProjectDir)NetBench360.xml</ConfigurationFile></ImageXex>
     <Deploy><ExcludedFromBuild>true</ExcludedFromBuild></Deploy>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\shared\bench.cpp" /><ClCompile Include="..\shared\ui.cpp" /><ClCompile Include="..\shared\ftp.cpp" /></ItemGroup>
-  <ItemGroup><ClInclude Include="..\shared\bench.h" /><ClInclude Include="..\shared\ui.h" /><ClInclude Include="..\shared\ftp.h" /><None Include="NetBench360.xml" /></ItemGroup>
+  <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\shared\bench.cpp" /><ClCompile Include="..\shared\ui.cpp" /><ClCompile Include="..\shared\ftp.cpp" /><ClCompile Include="imgui_impl_xbox360.cpp" />
+    <ClCompile Include="..\third_party\imgui\imgui.cpp"><WarningLevel>Level3</WarningLevel></ClCompile><ClCompile Include="..\third_party\imgui\imgui_draw.cpp"><WarningLevel>Level3</WarningLevel></ClCompile><ClCompile Include="..\third_party\imgui\imgui_widgets.cpp"><WarningLevel>Level3</WarningLevel></ClCompile><ClCompile Include="..\third_party\imgui\imgui_tables.cpp"><WarningLevel>Level3</WarningLevel></ClCompile></ItemGroup>
+  <ItemGroup><ClInclude Include="..\shared\bench.h" /><ClInclude Include="..\shared\ui.h" /><ClInclude Include="..\shared\ftp.h" /><ClInclude Include="imgui_impl_xbox360.h" /><ClInclude Include="..\third_party\imgui\imgui.h" /><None Include="NetBench360.xml" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

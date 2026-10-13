@@ -16,6 +16,8 @@ struct FtpObserver {
 // Serves passive-mode FTP on an already listening socket until cancelled, or
 // until maxSessions control connections have ended when maxSessions is nonzero.
 // address is the IPv4 address (network order) announced for passive data.
+// With a NULL user any user name and password log in; otherwise both must match.
 bool ServeFtp(SOCKET listener, const FtpRoot* roots, int rootCount, DWORD address, int socketBuffer,
-              int maxSessions, const FtpObserver& observer, char* error, size_t capacity);
+              int maxSessions, const char* user, const char* password, const FtpObserver& observer,
+              char* error, size_t capacity);
 }
