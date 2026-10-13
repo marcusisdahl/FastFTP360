@@ -280,11 +280,11 @@ static DWORD WINAPI DiskThread(void*) {
     const DiskTarget& target=DiskTargets[DiskChoice];
     const DWORD block=DiskBlocks[DiskBlockChoice];
     bool linked=false;
-    const char* path="game:\\NETBENCH360-DISKTEST.TMP";
+    const char* path="game:\\FASTFTP-DISKTEST.TMP";
     if(target.device) {
         LONG status=LinkDrive("\\??\\NBDISK:",target.device);
         if(status<0) { DiskFailure("%s not found or not mountable (0x%08X).",target.name,DWORD(status)); return 0; }
-        linked=true; path="NBDISK:\\NETBENCH360-DISKTEST.TMP";
+        linked=true; path="NBDISK:\\FASTFTP-DISKTEST.TMP";
     }
     unsigned char* buffer=static_cast<unsigned char*>(VirtualAlloc(NULL,block,MEM_COMMIT,PAGE_READWRITE));
     unsigned char* check=static_cast<unsigned char*>(VirtualAlloc(NULL,block,MEM_COMMIT,PAGE_READWRITE));

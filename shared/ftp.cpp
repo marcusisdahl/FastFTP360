@@ -447,7 +447,7 @@ void Session::Store(const char* argument) {
 
 void Session::Run() {
     Log("Connected");
-    Reply(shared_.user ? "220 NetBench360 FTP ready." : "220 NetBench360 FTP ready. Any user name and password.");
+    Reply(shared_.user ? "220 FastFTP ready." : "220 FastFTP ready. Any user name and password.");
     char line[600];
     while(!Cancelled() && ReadCommand(line,sizeof(line))) {
         char verb[8]={0}; const char* argument=line;

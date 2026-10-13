@@ -11,7 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace NetBench360 {
+namespace FastFTP {
     sealed class MainForm : Form {
         readonly Color navy=Color.FromArgb(15,23,37), panel=Color.FromArgb(25,37,55), ink=Color.FromArgb(226,235,244), accent=Color.FromArgb(62,217,188);
         TextBox ip,driver; ComboBox direction,duration,repeats,buffers,limits,streams,check; CheckBox pauseDrawing; Button start,stop,save;
@@ -19,10 +19,10 @@ namespace NetBench360 {
         readonly List<TestResult> results=new List<TestResult>();
         CancellationTokenSource cancellation; bool running,closeRequested; int testSeconds,activeLimit;
         public MainForm() {
-            Text="FastFTP network benchmark (NetBench360 v0.4.0)"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
+            Text="FastFTP network test v0.4.0"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
             StartPosition=FormStartPosition.CenterScreen; BackColor=navy; ForeColor=ink; Font=new Font("Segoe UI",10);
             AutoScaleMode=AutoScaleMode.Dpi;
-            LabelAt("NETBENCH360",26,20,520,40,24,FontStyle.Bold);
+            LabelAt("FASTFTP NETWORK TEST",26,20,520,40,24,FontStyle.Bold);
             LabelAt("Diagnostic defaults reduce Xbox sending load. Capped results do not measure maximum speed.",28,65,994,28,11);
             LabelAt("XBOX IP ADDRESS",28,119,190,22,9); ip=TextAt("",28,144,190); ip.AccessibleName="Xbox IP address";
             LabelAt("DRIVER LABEL",236,119,210,22,9); driver=TextAt("TxScan",236,144,210); driver.AccessibleName="Driver label";
@@ -164,7 +164,7 @@ namespace NetBench360 {
         }
         static string Csv(object value) { return "\""+Convert.ToString(value,CultureInfo.InvariantCulture).Replace("\"","\"\"")+"\""; }
         void Save(object sender,EventArgs args) {
-            using(var dialog=new SaveFileDialog { Filter="CSV results (*.csv)|*.csv",FileName="NetBench360-"+DateTime.Now.ToString("yyyyMMdd-HHmm")+".csv" }) {
+            using(var dialog=new SaveFileDialog { Filter="CSV results (*.csv)|*.csv",FileName="FastFTP-network-"+DateTime.Now.ToString("yyyyMMdd-HHmm")+".csv" }) {
                 if(dialog.ShowDialog()!=DialogResult.OK) return;
                 var lines=new List<string> { "utc,driver_label,xbox_ip,run,direction,requested_seconds,receiver_bytes,receiver_seconds,average_MiB_s,min_1s_MiB_s,max_1s_MiB_s,full_sample_count,integrity_bytes,requested_socket_bytes,pc_send_bytes,pc_receive_bytes,xbox_send_bytes,xbox_receive_bytes,warmup_MiB,xbox_send_limit_MiB_s,xbox_drawing_paused,streams,verified_bytes" };
                 foreach(var r in results) lines.Add(String.Join(",",new object[]{r.Utc,r.Driver,r.Address,r.Run,r.DirectionText,r.RequestedSeconds,r.Bytes,r.Microseconds/1000000.0,r.Rate,r.Minimum,r.Maximum,r.Samples,1048576,r.RequestedBuffer,r.PcSendBuffer,r.PcRecvBuffer,r.XboxSendBuffer,r.XboxRecvBuffer,32,r.XboxSendLimit,r.XboxDrawingPaused,r.Streams,r.Verified}.Select(Csv)));

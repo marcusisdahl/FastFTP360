@@ -37,7 +37,7 @@ FastFTP is experimental homebrew. Read [Safety](#safety) before using it on file
 You need a console that runs homebrew (XEX) applications, a working network connection, and a PC on the same home network. If you use a USB Ethernet adapter, keep its driver (for example [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet)) loaded as usual.
 
 1. Download `FastFTP-<version>.zip` from the [Releases page](https://github.com/marcusisdahl/Xbox360-FastFTP/releases).
-2. Copy `NetBench360.xex` to its own folder on the Xbox, for example `Hdd1:\Apps\FastFTP\`.
+2. Copy `FastFTP.xex` to its own folder on the Xbox, for example `Hdd1:\Apps\FastFTP\`.
 3. Start it from Aurora, XeXMenu or your usual launcher. **Do not** add it to `launch.ini`: it is an app, not a plugin.
 4. The app opens on the **FTP server** tab. Press **A** to start the server.
 5. In your FTP client, connect with:
@@ -52,7 +52,7 @@ You need a console that runs homebrew (XEX) applications, a working network conn
 
 6. When you are done, press **B** to stop the server, then **Back** to exit to the dashboard.
 
-`NetBench360-PC.exe` in the zip is only for the network test. You don't need it for FTP.
+`FastFTP-PC.exe` in the zip is only for the network test. You don't need it for FTP.
 
 ## The screens
 
@@ -120,10 +120,10 @@ Wrong logins, downloads, deletes, renames, new folders and disconnects are logge
 The network test measures raw TCP speed between the PC and the Xbox's memory, with no disk involved. Use it to check what your network adapter and driver can do before blaming the disk or the FTP client.
 
 1. On the **Network** tab, press **A**. The Xbox listens on port **36020**.
-2. On the PC, run `NetBench360-PC.exe` and enter the Xbox IP.
+2. On the PC, run `FastFTP-PC.exe` and enter the Xbox IP.
 3. Pick a direction, duration and number of streams, then start the test.
 
-<p align="center"><img src="docs/images/screen-pc-app.png" alt="NetBench360-PC.exe, the network test's PC app" width="640"></p>
+<p align="center"><img src="docs/images/screen-pc-app.png" alt="FastFTP-PC.exe, the network test's PC app" width="640"></p>
 
 The PC app can run 1, 2 or 4 TCP streams, check every byte (**All data**), limit the Xbox's send rate, and save results to CSV. Each stream first checks 1 MiB of known data and warms up with 32 MiB, then runs the timed transfer. The receiver reports the final rate. Use the PC app from the same release as the XEX. Versions with a different protocol are rejected.
 
@@ -133,7 +133,7 @@ The Xbox send limit applies **per stream**. While data moves, the Xbox holds a s
 
 On the **Disk** tab, use the D-pad to pick the drive (app drive, HDD, USB 0 or USB 1) and the block size (64 KiB, 256 KiB or 1 MiB), then press **A**.
 
-The test writes a **256 MiB** file named `NETBENCH360-DISKTEST.TMP`, including the final flush. It then reads the file back without the cache, checks every byte, and deletes it. You need more than 256 MiB free. **B** cancels.
+The test writes a **256 MiB** file named `FASTFTP-DISKTEST.TMP`, including the final flush. It then reads the file back without the cache, checks every byte, and deletes it. You need more than 256 MiB free. **B** cancels.
 
 USB storage and a USB Ethernet adapter share the Xbox's USB bandwidth. So FTP to a USB drive is much slower than FTP to the internal drive, even though both disks are fast on their own.
 
@@ -186,7 +186,7 @@ From PowerShell in the repository:
 .\build.ps1
 ```
 
-This produces `build\xbox\NetBench360.xex` (the Xbox app) and `build\windows\NetBench360-PC.exe` (the network test's PC app). The `.exe` next to the XEX is an intermediate PowerPC file, not the PC app. You can also open `NetBench360.sln` and build **Release | Xbox 360**. The project uses `DEVKIT_ONLY=0` for retail consoles and never deploys to a console automatically.
+This produces `build\xbox\FastFTP.xex` (the Xbox app) and `build\windows\FastFTP-PC.exe` (the network test's PC app). The `.exe` next to the XEX is an intermediate PowerPC file, not the PC app. You can also open `FastFTP.sln` and build **Release | Xbox 360**. The project uses `DEVKIT_ONLY=0` for retail consoles and never deploys to a console automatically.
 
 To build the PC app and run the host tests without the Xbox SDK (needs Python 3):
 
@@ -198,7 +198,7 @@ To build the PC app and run the host tests without the Xbox SDK (needs Python 3)
 
 ## Project history
 
-FastFTP grew out of **NetBench360**, a network benchmark for testing USB Ethernet drivers on the Xbox 360. Its FTP server turned out to be faster than Aurora's, so it became its own project. The executables, the Visual Studio solution and the PC app still use the NetBench360 name.
+FastFTP grew out of **NetBench360**, a network benchmark for testing USB Ethernet drivers on the Xbox 360. Its FTP server turned out to be faster than Aurora's, so it became its own project. Version 0.4.0 renamed the XEX, the PC app and the Visual Studio solution to FastFTP.
 
 ## License
 

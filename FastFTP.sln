@@ -2,7 +2,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "NetBench360", "xbox\NetBench360.vcxproj", "{33C84A5A-1065-42B4-934D-3360BE360001}"
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "FastFTP", "xbox\FastFTP.vcxproj", "{33C84A5A-1065-42B4-934D-3360BE360001}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

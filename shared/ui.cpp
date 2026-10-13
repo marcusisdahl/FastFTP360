@@ -118,11 +118,11 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
             if(s.streams>1) _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  %.1f s  /  %.1f MiB  /  %d streams",way,s.elapsed,s.mebibytes,s.streams);
             else _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  %.1f s  /  %.1f MiB",way,s.elapsed,s.mebibytes);
         } else if(s.armed) {
-            lines[0]="Listening. In NetBench360-PC.exe on the same network,";
+            lines[0]="Listening. In FastFTP-PC.exe on the same network,";
             lines[1]="enter the Xbox IP shown above and start the test.";
         } else {
             lines[0]="1   Press A to listen.";
-            lines[1]="2   Open NetBench360-PC.exe and enter the Xbox IP.";
+            lines[1]="2   Open FastFTP-PC.exe and enter the Xbox IP.";
             lines[2]="3   Start the test on the PC.";
         }
     }
@@ -179,7 +179,7 @@ static void Settings(const UiState& s,float x,float y,float w,float h) {
 static void PcApp(const UiState& s,float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+24,Hex(Muted),"ON THE PC");
-    Text(Body,x+28,y+62,Hex(White),"NetBench360-PC.exe");
+    Text(Body,x+28,y+62,Hex(White),"FastFTP-PC.exe");
     Text(Small,x+28,y+104,Hex(Muted),"Xbox IP to enter");
     Text(Heading,x+28,y+130,Hex(White),s.ip);
     Text(Small,x+28,y+h-46,Hex(Dim),"Tuning is on the Settings tab.");
@@ -255,7 +255,7 @@ static void Footer(const UiState& s,float y) {
 void DrawUi(const UiState& s) {
     ImGui::NewFrame();
     ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImVec2(1280,720));
-    ImGui::Begin("NetBench360",NULL,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoSavedSettings);
+    ImGui::Begin("FastFTP",NULL,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoSavedSettings);
     List=ImGui::GetWindowDrawList();
     List->AddRectFilled(ImVec2(0,0),ImVec2(1280,720),Hex(Background));
     char text[128];

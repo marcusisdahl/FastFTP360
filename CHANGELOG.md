@@ -4,7 +4,7 @@
 
 - **Your own FTP login**: press **Y** on the FTP server tab to type a user name and password with the Xbox keyboard (1-23 characters, no spaces). The login and the Login on/off setting are saved in `FastFTP.ini` next to the XEX, which can also be edited on a PC. Without the file the login is `xboxftp` / `xboxftp`. Four new checks in `tests/ftp.py`.
 - The app opens on the **FTP server** tab, now the first tab.
-- The screen header and the PC app's title now say **FastFTP**. The PC app's hint about Xbox buffers points to the Settings tab.
+- Renamed to **FastFTP** everywhere: `FastFTP.xex`, `FastFTP-PC.exe`, `FastFTP.sln`, the FTP greeting, the disk test's `FASTFTP-DISKTEST.TMP`, the screen header and the PC app. The PC app's hint about Xbox buffers points to the Settings tab.
 - The running FTP server's folder list wraps instead of running off the card. The header shows a port only on the FTP and Network tabs.
 - New logo, and a README rewritten with screenshots of every tab.
 - New **Settings** tab for the advanced options: Xbox socket buffers, worker CPU and drawing during transfers. The FTP tab keeps only the login (on/off, user name and password shown for the FTP client); the Network tab shows what to enter in the PC app; the Disk tab keeps drive and block size.

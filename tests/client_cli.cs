@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 using System;
 using System.Threading;
-using NetBench360;
+using FastFTP;
 class ClientTest {
     static int Main(string[] args) {
         Thread.CurrentThread.CurrentCulture=System.Globalization.CultureInfo.InvariantCulture;
