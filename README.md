@@ -22,7 +22,7 @@ NetBench360 uses the console's existing network route. To measure a USB Ethernet
 
 ## FTP server (Xbox)
 
-A small built-in FTP server for comparing with Aurora's FTP using the same driver, drive and PC. With the Xbox app stopped, press **LB**. The screen shows the folders and the address; connect an FTP client to that IP on port **21** in **passive mode**, with any user name and password. **B** stops the server.
+A small built-in FTP server for comparing with Aurora's FTP using the same driver, drive and PC. With the Xbox app stopped, switch to the **FTP server** tab with **LB**/**RB** and press **A**. The screen shows the folders and the address; connect an FTP client to that IP on port **21** in **passive mode**, with any user name and password. **B** stops the server.
 
 - `HDD`, `USB0`, `USB1`: the internal drive and USB drives that are present. `APP`: the drive NetBench360 was launched from.
 - `NULL`: uploads are discarded, and downloading `NULL/64MB.bin`, `NULL/256MB.bin` or any `NULL/<n>MB.bin` (1-4096) streams test data. This measures FTP over the network without the drive.
@@ -36,9 +36,10 @@ There is **no authentication or encryption**, as with the benchmark listener. Us
 
 Use it to see whether FTP is limited by the drive rather than the network. With the Xbox app stopped (not listening):
 
-1. Press **Y** to choose the drive: `APP DRIVE` (wherever NetBench360.xex was launched from), `HDD` (internal hard drive), `USB 0` or `USB 1`.
-2. Press **RB** to choose the block size: 64 KiB, 256 KiB or 1 MiB. Small blocks are closer to how many FTP servers write.
-3. Press **X**. The app writes a 256 MiB file `NETBENCH360-DISKTEST.TMP` and flushes it, reads it back without the file cache, compares every byte, then deletes the file. **B** stops it and also deletes the file.
+1. Switch to the **Disk** tab with **LB**/**RB**.
+2. With the D-pad, choose the drive: `App drive` (wherever NetBench360.xex was launched from), `HDD` (internal hard drive), `USB 0` or `USB 1`.
+3. Choose the block size the same way: 64 KiB, 256 KiB or 1 MiB. Small blocks are closer to how many FTP servers write.
+4. Press **A**. The app writes a 256 MiB file `NETBENCH360-DISKTEST.TMP` and flushes it, reads it back without the file cache, compares every byte, then deletes the file. **B** stops it and also deletes the file.
 
 The result line shows write and read MiB/s. The drive needs 256 MiB free. Compare: if disk write is well above the network RAM rate, the drive is not the FTP limit; if FTP to that drive is close to its disk write rate, the drive is the limit. FTP to a USB drive also shares the Xbox's USB with a USB Ethernet adapter, so it can be slower than either test alone.
 
@@ -61,7 +62,7 @@ Once a working control is established, change one variable at a time. Keep durat
 - **Full data check.** Set **Data check** to **All data** to compare every timed byte, not only the first 1 MiB. Use it whenever you test an experimental driver build, such as CUsbEnet with `USBENET_AX88179_TX_AGGREGATION=1`. It costs some CPU on the receiver, so compare rates with the same setting.
 - **Parallel streams.** Run the same test with 1, 2 and 4 streams. If 2 or 4 streams are clearly faster than 1, one TCP connection's window is the limit, not the driver or USB. If the total stays flat, look at the driver and USB path. The Xbox send limit applies to each stream, so set it to Unlimited (once the Baseline control run has passed) or account for streams × limit.
 - **PC socket buffers.** **Windows automatic** leaves receive-window autotuning on. Any fixed size turns it off for that connection.
-- **Xbox settings (D-pad, while stopped).** Up/Down cycles the listener's socket buffers: the 64 KiB startup default, 128 KiB or 256 KiB. Accepted connections inherit them; the actual sizes are shown in the CSV. Left/Right picks the hardware thread for stream workers: automatic or thread 0-5. USB completions run on hardware thread 2, so compare 2 with another thread. An error naming the buffer size means XNet refused it.
+- **Xbox settings (D-pad, while stopped).** On the Network tab, Up/Down picks a setting and Left/Right changes it. **Xbox socket buffers**: the 64 KiB startup default, 128 KiB or 256 KiB. Accepted connections inherit them; the actual sizes are shown in the CSV. **Worker CPU**: the hardware thread for stream workers, automatic or thread 0-5. USB completions run on hardware thread 2, so compare 2 with another thread. An error naming the buffer size means XNet refused it.
 
 ## What a run does
 

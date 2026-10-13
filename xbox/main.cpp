@@ -5,6 +5,8 @@
 #include "../shared/bench.h"
 #include "../shared/ui.h"
 #include "../shared/ftp.h"
+#include "../third_party/imgui/imgui.h"
+#include "imgui_impl_xbox360.h"
 
 static CRITICAL_SECTION StateLock;
 static nb::UiState State;
@@ -13,12 +15,6 @@ static HANDLE Worker=NULL;
 static HANDLE GraphicsIdle=NULL;
 static bool NetworkReady=false;
 static IDirect3DDevice9* Device=NULL;
-static IDirect3DVertexShader9* VertexShader=NULL;
-static IDirect3DPixelShader9* PixelShader=NULL;
-static IDirect3DVertexDeclaration9* Declaration=NULL;
-struct Vertex { float x,y; DWORD color; };
-static Vertex Vertices[65532];
-static unsigned int VertexCount=0;
 
 // Xbox socket buffer choices for the listener; accepted sockets inherit them.
 // Zero keeps the 64 KiB XNet startup default.
@@ -31,7 +27,7 @@ static int CpuChoice=0;
 // Disk test targets. The app's own drive needs no mount; the others are linked
 // to their kernel device for the test and unlinked afterwards.
 struct DiskTarget { const char* name; const char* device; };
-static const DiskTarget DiskTargets[]={{"APP DRIVE",NULL},{"HDD","\\Device\\Harddisk0\\Partition1"},
+static const DiskTarget DiskTargets[]={{"App drive",NULL},{"HDD","\\Device\\Harddisk0\\Partition1"},
     {"USB 0","\\Device\\Mass0"},{"USB 1","\\Device\\Mass1"}};
 static int DiskChoice=0;
 static const DWORD DiskBlocks[]={65536,262144,1048576};
@@ -77,12 +73,21 @@ static DWORD BatchLimit=0;
 static bool BatchFailed=false;
 
 static void DescribeSettings() {
-    char buffers[24],cpu[16];
-    if(BufferChoices[BufferChoice]) _snprintf_s(buffers,sizeof(buffers),_TRUNCATE,"%d KIB",BufferChoices[BufferChoice]/1024);
-    else strcpy_s(buffers,"STARTUP 64 KIB");
-    if(CpuChoice) _snprintf_s(cpu,sizeof(cpu),_TRUNCATE,"THREAD %d",CpuChoice-1); else strcpy_s(cpu,"AUTO");
-    _snprintf_s(State.settings,sizeof(State.settings),_TRUNCATE,"XBOX BUFFERS: %s / WORKER CPU: %s / DISK: %s %u KIB",
-        buffers,cpu,DiskTargets[DiskChoice].name,DiskBlocks[DiskBlockChoice]/1024);
+    if(BufferChoices[BufferChoice]) _snprintf_s(State.buffers,sizeof(State.buffers),_TRUNCATE,"%d KiB",BufferChoices[BufferChoice]/1024);
+    else strcpy_s(State.buffers,"Startup default (64 KiB)");
+    if(CpuChoice) _snprintf_s(State.cpu,sizeof(State.cpu),_TRUNCATE,"Hardware thread %d",CpuChoice-1); else strcpy_s(State.cpu,"Automatic");
+    strcpy_s(State.diskTarget,DiskTargets[DiskChoice].name);
+    if(DiskBlocks[DiskBlockChoice]>=1048576) _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u MiB",DiskBlocks[DiskBlockChoice]/1048576);
+    else _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u KiB",DiskBlocks[DiskBlockChoice]/1024);
+}
+// Steps the focused setting on the current tab by one choice (D-pad left/right).
+static void ChangeSetting(int tab,int row,int step) {
+    const int buffers=sizeof(BufferChoices)/sizeof(BufferChoices[0]),targets=sizeof(DiskTargets)/sizeof(DiskTargets[0]),
+        blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]);
+    if(tab==nb::TabDisk) {
+        if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
+    } else if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
+    else CpuChoice=(CpuChoice+7+step)%7;
 }
 static bool IsCancelled(void*) { return InterlockedCompareExchange(&Cancel,0,0)!=0; }
 // Called with StateLock held: combine every running stream into the screen state.
@@ -145,8 +150,8 @@ static DWORD WINAPI StreamThread(void* context) {
             if(BatchRate[1]>0) State.upload=BatchRate[1];
             if(BatchRate[2]>0) { State.download=BatchRate[2]; State.downloadLimit=BatchLimit; }
             ++State.completed;
-            if(BatchCount>1) _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"%d STREAMS PASSED THEIR DATA CHECKS. READY FOR THE NEXT PC TEST.",BatchCount);
-            else strcpy_s(State.message,stream->result.verified ? "ALL DATA CHECKED. READY FOR THE NEXT PC TEST." : "DATA CHECK PASSED. READY FOR THE NEXT PC TEST.");
+            if(BatchCount>1) _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"%d streams passed their data checks. Ready for the next PC test.",BatchCount);
+            else strcpy_s(State.message,stream->result.verified ? "All data checked. Ready for the next PC test." : "Data check passed. Ready for the next PC test.");
         }
         BatchRate[1]=BatchRate[2]=0; BatchCount=0; BatchLimit=0; BatchFailed=false;
     }
@@ -193,18 +198,18 @@ static DWORD WINAPI DiskThread(void*) {
     const char* path="game:\\NETBENCH360-DISKTEST.TMP";
     if(target.device) {
         LONG status=LinkDrive("\\??\\NBDISK:",target.device);
-        if(status<0) { DiskFailure("%s NOT FOUND OR NOT MOUNTABLE (0X%08X)",target.name,DWORD(status)); return 0; }
+        if(status<0) { DiskFailure("%s not found or not mountable (0x%08X).",target.name,DWORD(status)); return 0; }
         linked=true; path="NBDISK:\\NETBENCH360-DISKTEST.TMP";
     }
     unsigned char* buffer=static_cast<unsigned char*>(VirtualAlloc(NULL,block,MEM_COMMIT,PAGE_READWRITE));
     unsigned char* check=static_cast<unsigned char*>(VirtualAlloc(NULL,block,MEM_COMMIT,PAGE_READWRITE));
     double writeRate=0,readRate=0; bool ok=false;
-    if(!buffer || !check) DiskFailure("COULD NOT ALLOCATE DISK TEST BUFFERS%s (%u)","",GetLastError());
+    if(!buffer || !check) DiskFailure("Could not allocate disk test buffers%s (%u).","",GetLastError());
     else {
         nb::Pattern(buffer,0x360D15C);
         for(DWORD at=nb::Chunk;at<block;at+=nb::Chunk) memcpy(buffer+at,buffer,nb::Chunk);
         HANDLE file=CreateFile(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
-        if(file==INVALID_HANDLE_VALUE) DiskFailure("CANNOT CREATE TEST FILE ON %s (%u). FREE 256 MIB?",target.name,GetLastError());
+        if(file==INVALID_HANDLE_VALUE) DiskFailure("Cannot create the test file on %s (%u). Is 256 MiB free?",target.name,GetLastError());
         else {
             // Write phase: normal cached writes, like an FTP server; the final
             // flush is timed so data still in the cache is included.
@@ -213,19 +218,19 @@ static DWORD WINAPI DiskThread(void*) {
                 if(IsCancelled(NULL)) { ok=false; break; }
                 DWORD written=0;
                 if(!WriteFile(file,buffer,block,&written,NULL) || written!=block) {
-                    DiskFailure("WRITE FAILED ON %s (%u). DRIVE FULL?",target.name,GetLastError()); ok=false; break;
+                    DiskFailure("Write failed on %s (%u). Is the drive full?",target.name,GetLastError()); ok=false; break;
                 }
                 done+=block;
                 if(nb::Now()-update>=0.25) { update=nb::Now(); DiskProgress(1,done,update-begin); }
             }
-            if(ok && !FlushFileBuffers(file)) { DiskFailure("FLUSH FAILED ON %s (%u)",target.name,GetLastError()); ok=false; }
+            if(ok && !FlushFileBuffers(file)) { DiskFailure("Flush failed on %s (%u).",target.name,GetLastError()); ok=false; }
             CloseHandle(file);
             if(ok) { writeRate=double(DiskTestBytes)/1048576/(nb::Now()-begin); DiskProgress(1,done,nb::Now()-begin); }
         }
         if(ok) {
             // Read phase bypasses the file cache so the drive itself is measured.
             HANDLE file=CreateFile(path,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_FLAG_NO_BUFFERING|FILE_FLAG_SEQUENTIAL_SCAN,NULL);
-            if(file==INVALID_HANDLE_VALUE) { DiskFailure("CANNOT REOPEN TEST FILE ON %s (%u)",target.name,GetLastError()); ok=false; }
+            if(file==INVALID_HANDLE_VALUE) { DiskFailure("Cannot reopen the test file on %s (%u).",target.name,GetLastError()); ok=false; }
             else {
                 double begin=nb::Now(),update=begin; nb::U64 done=0;
                 DiskProgress(2,0,0);
@@ -233,10 +238,10 @@ static DWORD WINAPI DiskThread(void*) {
                     if(IsCancelled(NULL)) { ok=false; break; }
                     DWORD read=0;
                     if(!ReadFile(file,check,block,&read,NULL) || read!=block) {
-                        DiskFailure("READ FAILED ON %s (%u)",target.name,GetLastError()); ok=false; break;
+                        DiskFailure("Read failed on %s (%u).",target.name,GetLastError()); ok=false; break;
                     }
                     if(memcmp(check,buffer,block)) {
-                        DiskFailure("READ-BACK DATA MISMATCH ON %s AT MIB %u. STOP USING THIS DRIVE.",target.name,DWORD(done/1048576));
+                        DiskFailure("Read-back data mismatch on %s at MiB %u. Stop using this drive.",target.name,DWORD(done/1048576));
                         ok=false; break;
                     }
                     done+=block;
@@ -255,21 +260,21 @@ static DWORD WINAPI DiskThread(void*) {
     State.diskPhase=0;
     if(ok) {
         State.phase=nb::Idle;
-        _snprintf_s(State.disk,sizeof(State.disk),_TRUNCATE,"DISK %s %u KIB: WRITE %.2f / READ %.2f MIB/S / ALL DATA CHECKED",
+        _snprintf_s(State.disk,sizeof(State.disk),_TRUNCATE,"%s, %u KiB blocks: write %.2f, read %.2f MiB/s, all data checked",
             target.name,block/1024,writeRate,readRate);
-        strcpy_s(State.message,"DISK TEST PASSED. TEST FILE DELETED.");
-    } else if(IsCancelled(NULL)) { State.phase=nb::Stopped; strcpy_s(State.message,"DISK TEST STOPPED. TEST FILE DELETED."); }
+        strcpy_s(State.message,"Disk test passed. Test file deleted.");
+    } else if(IsCancelled(NULL)) { State.phase=nb::Stopped; strcpy_s(State.message,"Disk test stopped. Test file deleted."); }
     LeaveCriticalSection(&StateLock);
     return 0;
 }
 static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,double seconds,bool done,bool ok) {
     EnterCriticalSection(&StateLock);
     double mib=double(bytes)/1048576,rate=seconds>0 ? mib/seconds : 0;
-    const char* kind=operation[0]=='S' ? "UPLOAD" : "DOWNLOAD";
+    const char* kind=operation[0]=='S' ? "Upload" : "Download";
     if(done) {
         State.ftpPhase=1;
-        if(ok) _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"LAST %s %.1f MIB IN %.1f S / %.2f MIB/S",kind,mib,seconds,rate);
-        else _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"LAST %s FAILED AFTER %.1f MIB",kind,mib);
+        if(ok) _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"%s, %.1f MiB in %.1f s: %.2f MiB/s",kind,mib,seconds,rate);
+        else _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"%s failed after %.1f MiB",kind,mib);
     } else {
         State.ftpPhase=operation[0]=='S' ? 2 : 3; State.mebibytes=mib; State.elapsed=seconds; State.rate=rate;
     }
@@ -279,7 +284,7 @@ static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,do
 // be read, the app's own drive, and NULL (network only, no disk).
 static DWORD WINAPI FtpThread(void*) {
     nb::FtpRoot roots[5]; int count=0; bool linked[3]={false,false,false};
-    char folders[100]="FOLDERS:";
+    char folders[100]="Folders:";
     for(int i=0;i<3;++i) {
         if(LinkDrive(FtpDrives[i].link,FtpDrives[i].device)<0) continue;
         char pattern[16]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\*",FtpDrives[i].path);
@@ -292,18 +297,18 @@ static DWORD WINAPI FtpThread(void*) {
     }
     roots[count].name="APP"; roots[count].path="game:"; ++count;
     roots[count].name="NULL"; roots[count].path=NULL; ++count;
-    strcat_s(folders," APP NULL / PASSIVE MODE / B STOPS THE SERVER");
+    strcat_s(folders," APP NULL");
     char error[100]={0};
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
     bool ready=listener!=INVALID_SOCKET;
-    if(!ready) _snprintf_s(error,sizeof(error),_TRUNCATE,"FTP SOCKET CREATE FAILED (%d)",WSAGetLastError());
+    if(!ready) _snprintf_s(error,sizeof(error),_TRUNCATE,"FTP socket create failed (%d).",WSAGetLastError());
     if(ready && BufferChoices[BufferChoice]) ready=nb::SetSocketBuffers(listener,BufferChoices[BufferChoice],error,sizeof(error));
     if(ready) ready=nb::PrepareListener(listener,error,sizeof(error));
     sockaddr_in address={0}; address.sin_family=AF_INET; address.sin_addr.s_addr=INADDR_ANY; address.sin_port=htons(nb::FtpPort);
     if(ready && bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address))) {
-        _snprintf_s(error,sizeof(error),_TRUNCATE,"BIND FTP PORT 21 FAILED (%d)",WSAGetLastError()); ready=false;
+        _snprintf_s(error,sizeof(error),_TRUNCATE,"Bind FTP port 21 failed (%d).",WSAGetLastError()); ready=false;
     }
-    if(ready && listen(listener,8)) { _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTEN FTP PORT 21 FAILED (%d)",WSAGetLastError()); ready=false; }
+    if(ready && listen(listener,8)) { _snprintf_s(error,sizeof(error),_TRUNCATE,"Listen on FTP port 21 failed (%d).",WSAGetLastError()); ready=false; }
     if(ready) {
         XNADDR xnaddr={0}; XNetGetTitleXnAddr(&xnaddr);
         EnterCriticalSection(&StateLock);
@@ -315,27 +320,27 @@ static DWORD WINAPI FtpThread(void*) {
     if(listener!=INVALID_SOCKET) closesocket(listener);
     for(int i=0;i<3;++i) if(linked[i]) UnlinkDrive(FtpDrives[i].link);
     EnterCriticalSection(&StateLock); State.ftpPhase=0; State.armed=0; LeaveCriticalSection(&StateLock);
-    if(!ready && !IsCancelled(NULL)) Failure(error[0] ? error : "FTP SERVER FAILED");
-    else { EnterCriticalSection(&StateLock); State.phase=nb::Stopped; strcpy_s(State.message,"FTP SERVER STOPPED."); LeaveCriticalSection(&StateLock); }
+    if(!ready && !IsCancelled(NULL)) Failure(error[0] ? error : "FTP server failed.");
+    else { EnterCriticalSection(&StateLock); State.phase=nb::Stopped; strcpy_s(State.message,"FTP server stopped."); LeaveCriticalSection(&StateLock); }
     return 0;
 }
 static DWORD WINAPI ServerThread(void*) {
     char error[100]={0};
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
     bool ready=listener!=INVALID_SOCKET;
-    if(!ready) _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTENER SOCKET CREATE FAILED (%d)",WSAGetLastError());
+    if(!ready) _snprintf_s(error,sizeof(error),_TRUNCATE,"Listener socket create failed (%d).",WSAGetLastError());
     if(ready && BufferChoices[BufferChoice]) ready=nb::SetSocketBuffers(listener,BufferChoices[BufferChoice],error,sizeof(error));
     if(ready) ready=nb::PrepareListener(listener,error,sizeof(error));
     sockaddr_in address={0}; address.sin_family=AF_INET; address.sin_addr.s_addr=INADDR_ANY; address.sin_port=htons(nb::Port);
     if(ready && bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address))) {
         int code=WSAGetLastError();
-        _snprintf_s(error,sizeof(error),_TRUNCATE,"BIND PORT 36020 FAILED (%d)",code); ready=false;
+        _snprintf_s(error,sizeof(error),_TRUNCATE,"Bind port 36020 failed (%d).",code); ready=false;
     }
     if(ready && listen(listener,nb::MaxStreams)) {
         int code=WSAGetLastError();
-        _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTEN PORT 36020 FAILED (%d)",code); ready=false;
+        _snprintf_s(error,sizeof(error),_TRUNCATE,"Listen on port 36020 failed (%d).",code); ready=false;
     }
-    if(!ready) Failure(error[0]?error:"COULD NOT LISTEN ON PORT 36020");
+    if(!ready) Failure(error[0]?error:"Could not listen on port 36020.");
     else {
         Progress(NULL,nb::Listening,0,0,0,0);
         while(!IsCancelled(NULL)) {
@@ -343,7 +348,7 @@ static DWORD WINAPI ServerThread(void*) {
             int selected=select(0,&read,NULL,NULL,&timeout);
             if(selected==0) continue;
             if(selected==SOCKET_ERROR) {
-                _snprintf_s(error,sizeof(error),_TRUNCATE,"LISTENER WAIT FAILED (%d)",WSAGetLastError()); Failure(error); break;
+                _snprintf_s(error,sizeof(error),_TRUNCATE,"Listener wait failed (%d).",WSAGetLastError()); Failure(error); break;
             }
             SOCKET client=accept(listener,NULL,NULL);
             if(client==INVALID_SOCKET) continue;
@@ -357,7 +362,7 @@ static DWORD WINAPI ServerThread(void*) {
     }
     if(listener!=INVALID_SOCKET) closesocket(listener);
     EnterCriticalSection(&StateLock); State.armed=0; State.streams=0;
-    if(IsCancelled(NULL)) { State.phase=nb::Stopped; strcpy_s(State.message,"STOPPED. PRESS A TO LISTEN AGAIN."); }
+    if(IsCancelled(NULL)) { State.phase=nb::Stopped; strcpy_s(State.message,"Stopped. Press A to listen again."); }
     LeaveCriticalSection(&StateLock);
     return 0;
 }
@@ -370,50 +375,28 @@ static bool InitGraphics() {
     pp.PresentationInterval=D3DPRESENT_INTERVAL_ONE;
     HRESULT hr=d3d->CreateDevice(0,D3DDEVTYPE_HAL,NULL,D3DCREATE_HARDWARE_VERTEXPROCESSING,&pp,&Device);
     d3d->Release(); if(FAILED(hr)) return false;
-    const char* vs="struct V { float2 p:POSITION0; float4 c:COLOR0; }; struct O { float4 p:POSITION0; float4 c:COLOR0; }; O main(V v) { O o; o.p=float4(v.p,0,1); o.c=v.c; return o; }";
-    const char* ps="float4 main(float4 c:COLOR0):COLOR0 { return c; }";
-    ID3DXBuffer* code=NULL; ID3DXBuffer* errors=NULL;
-    hr=D3DXCompileShader(vs,UINT(strlen(vs)),NULL,NULL,"main","vs_2_0",0,&code,&errors,NULL);
-    if(errors) errors->Release(); if(FAILED(hr)) return false;
-    hr=Device->CreateVertexShader(reinterpret_cast<DWORD*>(code->GetBufferPointer()),&VertexShader);
-    code->Release(); if(FAILED(hr)) return false;
-    code=NULL; errors=NULL;
-    hr=D3DXCompileShader(ps,UINT(strlen(ps)),NULL,NULL,"main","ps_2_0",0,&code,&errors,NULL);
-    if(errors) errors->Release(); if(FAILED(hr)) return false;
-    hr=Device->CreatePixelShader(reinterpret_cast<DWORD*>(code->GetBufferPointer()),&PixelShader);
-    code->Release(); if(FAILED(hr)) return false;
-    const D3DVERTEXELEMENT9 elements[]={
-        {0,0,D3DDECLTYPE_FLOAT2,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_POSITION,0},
-        {0,8,D3DDECLTYPE_D3DCOLOR,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_COLOR,0},D3DDECL_END()};
-    return SUCCEEDED(Device->CreateVertexDeclaration(elements,&Declaration));
+    return ImGuiXbox360Init(Device);
 }
-static void Rectangle(void*,int x,int y,int w,int h,unsigned int color) {
-    if(VertexCount+6>sizeof(Vertices)/sizeof(Vertices[0])) return;
-    float left=2.0f*x/1280-1,right=2.0f*(x+w)/1280-1,top=1-2.0f*y/720,bottom=1-2.0f*(y+h)/720;
-    Vertex quad[6]={{left,top,color},{right,top,color},{left,bottom,color},{left,bottom,color},{right,top,color},{right,bottom,color}};
-    memcpy(Vertices+VertexCount,quad,sizeof(quad)); VertexCount+=6;
-}
-static void Render(const nb::UiState& state) {
-    VertexCount=0; nb::DrawUi(state,Rectangle,NULL);
+static void Render(const nb::UiState& state,float seconds) {
+    ImGui::GetIO().DeltaTime=seconds>0.0001f ? seconds : 0.0001f;
+    nb::DrawUi(state);
     Device->Clear(0,NULL,D3DCLEAR_TARGET,0xFF0F1725,1,0);
-    Device->SetRenderState(D3DRS_ZENABLE,FALSE); Device->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);
-    Device->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);
-    Device->SetVertexDeclaration(Declaration); Device->SetVertexShader(VertexShader); Device->SetPixelShader(PixelShader);
-    Device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,VertexCount/3,Vertices,sizeof(Vertex));
+    ImGuiXbox360Render(ImGui::GetDrawData());
     Device->Present(NULL,NULL,NULL,NULL);
 }
 void __cdecl main() {
     InitializeCriticalSection(&StateLock);
     for(int i=0;i<nb::MaxStreams;++i) { Streams[i].thread=NULL; Streams[i].socket=INVALID_SOCKET; }
     DescribeSettings();
+    nb::InitUi();
     if(!InitGraphics()) XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);
     GraphicsIdle=CreateEvent(NULL,TRUE,FALSE,NULL);
     XNetStartupParams network={0}; network.cfgSizeOfStruct=sizeof(network); network.cfgFlags=XNET_STARTUP_BYPASS_SECURITY;
     network.cfgSockDefaultRecvBufsizeInK=64; network.cfgSockDefaultSendBufsizeInK=64;
     bool xnet=XNetStartup(&network)==0; WSADATA wsa;
     NetworkReady=xnet && WSAStartup(MAKEWORD(2,2),&wsa)==0;
-    if(!NetworkReady) Failure("NETWORK STARTUP FAILED. BACK TO EXIT.");
-    WORD previous=0; double lastAddress=0; bool renderingPaused=false;
+    if(!NetworkReady) Failure("Network startup failed. Press Back to exit.");
+    WORD previous=0; double lastAddress=0,lastFrame=nb::Now(); bool renderingPaused=false;
     for(;;) {
         if(Worker && WaitForSingleObject(Worker,0)==WAIT_OBJECT_0) { CloseHandle(Worker); Worker=NULL; }
         if(NetworkReady && nb::Now()-lastAddress>=1) {
@@ -421,57 +404,64 @@ void __cdecl main() {
             EnterCriticalSection(&StateLock);
             const BYTE* octets=reinterpret_cast<const BYTE*>(&address.ina);
             if(address.ina.s_addr) _snprintf_s(State.ip,sizeof(State.ip),_TRUNCATE,"%u.%u.%u.%u",octets[0],octets[1],octets[2],octets[3]);
-            else strcpy_s(State.ip,"WAITING FOR NETWORK");
+            else strcpy_s(State.ip,"Waiting for network");
             LeaveCriticalSection(&StateLock); lastAddress=nb::Now();
         }
         WORD buttons=0;
         for(DWORD pad=0;pad<4;++pad) { XINPUT_STATE input={0}; if(XInputGetState(pad,&input)==ERROR_SUCCESS) buttons|=input.Gamepad.wButtons; }
         WORD pressed=buttons & ~previous; previous=buttons;
-        if((pressed&XINPUT_GAMEPAD_A) && NetworkReady && !Worker) {
+        // A starts whatever the current tab is for; B stops it.
+        if((pressed&XINPUT_GAMEPAD_A) && !Worker && State.tab==nb::TabNetwork && NetworkReady) {
             InterlockedExchange(&Cancel,0);
             EnterCriticalSection(&StateLock); State.armed=1; State.message[0]=0; LeaveCriticalSection(&StateLock);
             Worker=CreateThread(NULL,128*1024,ServerThread,NULL,0,NULL);
-            if(!Worker) { Failure("COULD NOT START WORKER"); EnterCriticalSection(&StateLock); State.armed=0; LeaveCriticalSection(&StateLock); }
+            if(!Worker) { Failure("Could not start the worker."); EnterCriticalSection(&StateLock); State.armed=0; LeaveCriticalSection(&StateLock); }
         }
-        if((pressed&XINPUT_GAMEPAD_LEFT_SHOULDER) && NetworkReady && !Worker) {
+        if((pressed&XINPUT_GAMEPAD_A) && !Worker && State.tab==nb::TabFtp && NetworkReady) {
             InterlockedExchange(&Cancel,0);
             EnterCriticalSection(&StateLock); State.armed=1; State.message[0]=0; LeaveCriticalSection(&StateLock);
             Worker=CreateThread(NULL,128*1024,FtpThread,NULL,0,NULL);
-            if(!Worker) { EnterCriticalSection(&StateLock); State.armed=0; LeaveCriticalSection(&StateLock); Failure("COULD NOT START FTP SERVER"); }
+            if(!Worker) { EnterCriticalSection(&StateLock); State.armed=0; LeaveCriticalSection(&StateLock); Failure("Could not start the FTP server."); }
         }
-        if((pressed&XINPUT_GAMEPAD_X) && !Worker) {
+        if((pressed&XINPUT_GAMEPAD_A) && !Worker && State.tab==nb::TabDisk) {
             InterlockedExchange(&Cancel,0);
             EnterCriticalSection(&StateLock); State.message[0]=0; State.phase=nb::Idle; LeaveCriticalSection(&StateLock);
             DiskProgress(1,0,0);
             Worker=CreateThread(NULL,64*1024,DiskThread,NULL,0,NULL);
-            if(!Worker) { EnterCriticalSection(&StateLock); State.diskPhase=0; LeaveCriticalSection(&StateLock); Failure("COULD NOT START DISK TEST"); }
+            if(!Worker) { EnterCriticalSection(&StateLock); State.diskPhase=0; LeaveCriticalSection(&StateLock); Failure("Could not start the disk test."); }
         }
         if(pressed&XINPUT_GAMEPAD_B) InterlockedExchange(&Cancel,1);
-        // Settings apply when listening starts, so they change only while stopped.
-        if(!Worker && (pressed&(XINPUT_GAMEPAD_DPAD_UP|XINPUT_GAMEPAD_DPAD_DOWN|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))) {
-            const int buffers=sizeof(BufferChoices)/sizeof(BufferChoices[0]);
-            if(pressed&XINPUT_GAMEPAD_DPAD_UP) BufferChoice=(BufferChoice+1)%buffers;
-            if(pressed&XINPUT_GAMEPAD_DPAD_DOWN) BufferChoice=(BufferChoice+buffers-1)%buffers;
-            if(pressed&XINPUT_GAMEPAD_DPAD_RIGHT) CpuChoice=(CpuChoice+1)%7;
-            if(pressed&XINPUT_GAMEPAD_DPAD_LEFT) CpuChoice=(CpuChoice+6)%7;
-            EnterCriticalSection(&StateLock); DescribeSettings(); LeaveCriticalSection(&StateLock);
+        // Tabs and settings change only while stopped; settings apply when a test starts.
+        if(!Worker && (pressed&(XINPUT_GAMEPAD_LEFT_SHOULDER|XINPUT_GAMEPAD_RIGHT_SHOULDER))) {
+            EnterCriticalSection(&StateLock);
+            State.tab=(State.tab+nb::TabCount+((pressed&XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 1 : -1))%nb::TabCount;
+            State.focus=0; State.message[0]=0; State.phase=nb::Idle;
+            LeaveCriticalSection(&StateLock);
         }
-        if(!Worker && (pressed&(XINPUT_GAMEPAD_Y|XINPUT_GAMEPAD_RIGHT_SHOULDER))) {
-            if(pressed&XINPUT_GAMEPAD_Y) DiskChoice=(DiskChoice+1)%(sizeof(DiskTargets)/sizeof(DiskTargets[0]));
-            if(pressed&XINPUT_GAMEPAD_RIGHT_SHOULDER) DiskBlockChoice=(DiskBlockChoice+1)%(sizeof(DiskBlocks)/sizeof(DiskBlocks[0]));
-            EnterCriticalSection(&StateLock); DescribeSettings(); LeaveCriticalSection(&StateLock);
+        if(!Worker && (pressed&(XINPUT_GAMEPAD_DPAD_UP|XINPUT_GAMEPAD_DPAD_DOWN|XINPUT_GAMEPAD_DPAD_LEFT|XINPUT_GAMEPAD_DPAD_RIGHT))) {
+            EnterCriticalSection(&StateLock);
+            const int rows=nb::SettingCount(State.tab);
+            if(pressed&XINPUT_GAMEPAD_DPAD_DOWN) State.focus=(State.focus+1)%rows;
+            if(pressed&XINPUT_GAMEPAD_DPAD_UP) State.focus=(State.focus+rows-1)%rows;
+            if(pressed&XINPUT_GAMEPAD_DPAD_RIGHT) ChangeSetting(State.tab,State.focus,1);
+            if(pressed&XINPUT_GAMEPAD_DPAD_LEFT) ChangeSetting(State.tab,State.focus,-1);
+            DescribeSettings();
+            LeaveCriticalSection(&StateLock);
         }
         if((pressed&XINPUT_GAMEPAD_BACK) && !Worker) break;
         EnterCriticalSection(&StateLock); nb::UiState snapshot=State; LeaveCriticalSection(&StateLock);
+        snapshot.busy=Worker!=NULL;
+        const double now=nb::Now(); const float seconds=float(now-lastFrame); lastFrame=now;
         if(snapshot.armed && (snapshot.options&nb::PauseDrawing)) {
             if(!renderingPaused) {
-                strcpy_s(snapshot.message,"DRAWING PAUSED. USE PC FOR LIVE PROGRESS. B STILL STOPS.");
-                Render(snapshot); Device->BlockUntilIdle(); renderingPaused=true;
+                strcpy_s(snapshot.message,"Drawing paused. The PC shows live progress. B still stops.");
+                Render(snapshot,seconds); Device->BlockUntilIdle(); renderingPaused=true;
             }
             if(GraphicsIdle) SetEvent(GraphicsIdle);
-        } else { renderingPaused=false; Render(snapshot); }
-        // Ten UI updates per second keep rendering work modest during a test.
-        Sleep(100);
+        } else { renderingPaused=false; Render(snapshot,seconds); }
+        // Ten UI updates per second keep rendering work modest during a test;
+        // while stopped, run faster so the menus respond quickly.
+        Sleep(Worker ? 100 : 16);
     }
     if(NetworkReady) WSACleanup(); if(xnet) XNetCleanup();
     if(GraphicsIdle) CloseHandle(GraphicsIdle);
