@@ -55,6 +55,18 @@ password=xboxftp
 
 Lines that are missing or invalid keep the defaults.
 
+### Transfer list and log file
+
+The FTP tab lists the last five finished transfers with their file name, size and speed. Every event is also written to `FastFTP.log` next to the XEX, for example:
+
+```text
+2026-10-13 18:40:12  FTP server started on 192.168.1.50 port 21, login xboxftp. Folders: Game Hdd1 Usb0
+2026-10-13 18:40:31  192.168.1.20  Logged in as xboxftp
+2026-10-13 18:44:52  192.168.1.20  Upload /Hdd1/Games/game.iso, 7466336256 bytes in 259.10 s (27.48 MiB/s)
+```
+
+Logins, wrong logins, downloads, deletes, renames, new folders and disconnects are logged too. When the log grows past 1 MiB it is moved to `FastFTP.old.log` the next time the server starts.
+
 ### Folders exposed over FTP
 
 The top level lists the drives the way Aurora's FTP does, sorted by name, so paths such as `/Hdd1/Content/...` are the same in both servers:

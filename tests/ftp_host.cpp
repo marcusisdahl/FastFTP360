@@ -11,6 +11,7 @@ static bool Cancelled(void*) { return nb::Now()-Started>120; }
 static void Progress(void*,const char* operation,const char* file,nb::U64 bytes,double seconds,bool done,bool ok) {
     if(done) { printf("%s %s %s bytes=%I64u seconds=%.3f\n",ok ? "DONE" : "FAILED",operation,file,bytes,seconds); fflush(stdout); }
 }
+static void Log(void*,const char* line) { printf("LOG %s\n",line); fflush(stdout); }
 int main(int argc,char** argv) {
     if(argc==3 && !strcmp(argv[1],"--login-file")) {
         char text[512]={0}; FILE* file=NULL;
@@ -33,7 +34,7 @@ int main(int argc,char** argv) {
     address.sin_port=htons(u_short(atoi(argv[1])));
     if(bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address)) || listen(listener,8)) return 2;
     const nb::FtpRoot roots[]={{"HDD",argv[2]},{"NULL",NULL}};
-    nb::FtpObserver observer={NULL,Cancelled,Progress};
+    nb::FtpObserver observer={NULL,Cancelled,Progress,Log};
     printf("READY %s\n",argv[1]); fflush(stdout);
     Started=nb::Now();
     bool ok=nb::ServeFtp(listener,roots,2,htonl(INADDR_LOOPBACK),0,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));

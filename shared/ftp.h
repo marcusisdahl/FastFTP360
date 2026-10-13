@@ -12,6 +12,9 @@ struct FtpObserver {
     bool (*cancelled)(void*);
     // operation is "STOR" or "RETR". Called during a transfer and once with done set.
     void (*progress)(void*, const char* operation, const char* file, U64 bytes, double seconds, bool done, bool ok);
+    // Optional. One line per event for the log file: connections, logins,
+    // transfers, deletes, renames and new folders. Called from session threads.
+    void (*log)(void*, const char* line);
 };
 // Serves passive-mode FTP on an already listening socket until cancelled, or
 // until maxSessions control connections have ended when maxSessions is nonzero.

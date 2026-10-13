@@ -8,7 +8,7 @@
 #include <string.h>
 namespace nb {
 UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),
-    tab(0),focus(0),busy(0),keyboard(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
+    tab(0),focus(0),busy(0),keyboard(0),recentCount(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
     buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
 }
@@ -123,7 +123,9 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
     bool live=(s.tab==TabNetwork && (s.phase==5 || s.phase==6)) || (s.tab==TabDisk && s.diskPhase) || (s.tab==TabFtp && s.ftpPhase>1);
     if(live) {
         Rate(x-4,y+50,s.rate);
-        Text(Body,x,y+h-112,Hex(Muted),(s.options&1) ? "Drawing paused during the transfer. B still stops." : text);
+        // Below the big rate, also on the shorter FTP card.
+        float detail=y+h-112; if(detail<y+150) detail=y+150;
+        Text(Body,x,detail,Hex(Muted),(s.options&1) ? "Drawing paused during the transfer. B still stops." : text);
     }
     else if(s.message[0] && s.ftpPhase!=1) List->AddText(Body,Body->FontSize,ImVec2(x,y+60),Hex(error ? Error : White),s.message,NULL,w);
     else for(int i=0;i<3 && lines[i];++i) Text(Body,x,y+60+i*38,Hex(White),lines[i]);
@@ -142,14 +144,17 @@ static void Settings(const UiState& s,float x,float y,float w,float h) {
         labels[2]="Drawing during transfers"; values[2]=s.drawing;
     }
     else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing; }
+    // Rows close up a little on the shorter FTP card.
+    const float pitch=h<280 ? 60.0f : 70.0f;
     for(int i=0;i<rows;++i) {
-        float top=y+56+i*70; bool focused=!s.busy && i==s.focus;
-        if(focused) { Box(x+16,top,w-32,64,Hex(Raised),10); Box(x+16,top+10,5,44,Hex(Green),2); }
-        Text(Small,x+36,top+5,Hex(s.busy ? Dim : Muted),labels[i]);
-        Text(Body,x+36,top+30,Hex(s.busy ? Dim : White),values[i]);
+        float top=y+56+i*pitch; bool focused=!s.busy && i==s.focus;
+        if(focused) { Box(x+16,top,w-32,pitch-6,Hex(Raised),10); Box(x+16,top+(pitch-6-44)/2,5,44,Hex(Green),2); }
+        const float tight=pitch<70 ? 3.0f : 0.0f;
+        Text(Small,x+36,top+5-tight,Hex(s.busy ? Dim : Muted),labels[i]);
+        Text(Body,x+36,top+30-2*tight,Hex(s.busy ? Dim : White),values[i]);
         if(focused) {
-            TextRight(Heading,x+w-36,top+12,Hex(Green),">");
-            TextRight(Heading,x+w-36-Width(Heading,">")-14,top+12,Hex(Green),"<");
+            TextRight(Heading,x+w-36,top+pitch/2-20,Hex(Green),">");
+            TextRight(Heading,x+w-36-Width(Heading,">")-14,top+pitch/2-20,Hex(Green),"<");
         }
     }
 }
@@ -170,6 +175,30 @@ static void Results(const UiState& s,float x,float y,float w,float h) {
     } else {
         const char* line=s.tab==TabDisk ? s.disk : s.ftp;
         Text(Body,x+28,y+52,Hex(line[0] ? White : Dim),line[0] ? line : "No result yet.");
+    }
+}
+
+static void Size(char* text,size_t capacity,double mebibytes) {
+    if(mebibytes>=1024) _snprintf_s(text,capacity,_TRUNCATE,"%.2f GiB",mebibytes/1024);
+    else if(mebibytes>=1) _snprintf_s(text,capacity,_TRUNCATE,"%.1f MiB",mebibytes);
+    else _snprintf_s(text,capacity,_TRUNCATE,"%.0f KiB",mebibytes*1024);
+}
+// Bottom card on the FTP tab: the last five finished transfers, newest first.
+static void Transfers(const UiState& s,float x,float y,float w,float h) {
+    char text[80]; Box(x,y,w,h,Hex(Card),14);
+    Text(Small,x+28,y+14,Hex(Muted),"LAST 5 TRANSFERS");
+    if(!s.recentCount) { Text(Body,x+28,y+48,Hex(Dim),"No transfers yet."); return; }
+    const float name=x+150,size=x+w-300,rate=x+w-28;
+    for(int i=0;i<s.recentCount && i<UiRecentTransfers;++i) {
+        const UiTransfer& t=s.recent[i]; float top=y+44+i*26;
+        Text(Small,x+28,top,Hex(t.upload ? Green : Blue),t.upload ? "Upload" : "Download");
+        // Long names are cut with "..." so the size column stays clear.
+        char shown[72]; strcpy_s(shown,t.name);
+        for(size_t length=strlen(shown);length>4 && Width(Small,shown)>size-170-name;) { --length; strcpy_s(shown+length-3,4,"..."); }
+        Text(Small,name,top,Hex(White),shown);
+        Size(text,sizeof(text),t.mebibytes); TextRight(Small,size,top,Hex(White),text);
+        if(t.ok) _snprintf_s(text,sizeof(text),_TRUNCATE,"%.2f MiB/s",t.rate); else strcpy_s(text,"Failed");
+        TextRight(Small,rate,top,Hex(t.ok ? Muted : Error),text);
     }
 }
 
@@ -217,9 +246,16 @@ void DrawUi(const UiState& s) {
     }
     if(!s.busy) { Box(x,y+6,40,30,Hex(Raised),8); Text(Small,x+8,y+9,Hex(White),"RB"); }
 
-    Status(s,Left,184,744,280);
-    Settings(s,Left+764,184,Right-Left-764,280);
-    Results(s,Left,484,Right-Left,110);
+    // The FTP tab trades some card height for the last-transfers list.
+    if(s.tab==TabFtp) {
+        Status(s,Left,184,744,240);
+        Settings(s,Left+764,184,Right-Left-764,240);
+        Transfers(s,Left,440,Right-Left,176);
+    } else {
+        Status(s,Left,184,744,280);
+        Settings(s,Left+764,184,Right-Left-764,280);
+        Results(s,Left,484,Right-Left,110);
+    }
 
     Footer(s,628);
 

@@ -2,6 +2,7 @@
 // Minimal passive-mode FTP server for throughput tests. The optional login is
 // sent unencrypted, so it must only be armed on a trusted LAN.
 #include "ftp.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -80,17 +81,30 @@ class Session {
     Shared& shared_;
     SOCKET control_,passive_;
     char cwd_[512],input_[1024],renameFrom_[512];
-    char user_[64];
+    char user_[64],peer_[24],renamePath_[600];
     int inputCount_;
     bool loggedIn_;
 public:
     Session(Shared& shared,SOCKET control) : shared_(shared),control_(control),passive_(INVALID_SOCKET),inputCount_(0),loggedIn_(!shared.user) {
-        strcpy_s(cwd_,"/"); renameFrom_[0]=0; user_[0]=0;
+        strcpy_s(cwd_,"/"); renameFrom_[0]=0; renamePath_[0]=0; user_[0]=0; strcpy_s(peer_,"?");
+        sockaddr_in address; int length=sizeof(address);
+        if(!getpeername(control,reinterpret_cast<sockaddr*>(&address),&length)) {
+            const BYTE* ip=reinterpret_cast<const BYTE*>(&address.sin_addr);
+            _snprintf_s(peer_,sizeof(peer_),_TRUNCATE,"%u.%u.%u.%u",ip[0],ip[1],ip[2],ip[3]);
+        }
     }
     ~Session() { ClosePassive(); }
     void Run();
 private:
     bool Cancelled() const { return shared_.observer->cancelled && shared_.observer->cancelled(shared_.observer->context); }
+    void Log(const char* format,...) {
+        if(!shared_.observer->log) return;
+        char line[700]; int used=_snprintf_s(line,sizeof(line),_TRUNCATE,"%s  ",peer_);
+        va_list arguments; va_start(arguments,format);
+        _vsnprintf_s(line+used,sizeof(line)-used,_TRUNCATE,format,arguments);
+        va_end(arguments);
+        shared_.observer->log(shared_.observer->context,line);
+    }
     void Progress(const char* operation,const char* file,U64 bytes,double seconds,bool done,bool ok) {
         if(shared_.observer->progress) shared_.observer->progress(shared_.observer->context,operation,file,bytes,seconds,done,ok);
     }
@@ -139,7 +153,7 @@ private:
     void List(const char* argument,bool namesOnly);
     void Retrieve(const char* argument);
     void Store(const char* argument);
-    bool TransferDone(const char* operation,const char* name,U64 bytes,double begin,bool ok,const char* failure);
+    bool TransferDone(const char* operation,const char* name,const char* path,U64 bytes,double begin,bool ok,const char* failure);
 };
 
 bool Session::ReadCommand(char* line,size_t capacity) {
@@ -305,9 +319,12 @@ void Session::List(const char* argument,bool namesOnly) {
     Reply(ok ? "226 Listing sent." : "426 Listing interrupted.");
 }
 
-bool Session::TransferDone(const char* operation,const char* name,U64 bytes,double begin,bool ok,const char* failure) {
+bool Session::TransferDone(const char* operation,const char* name,const char* path,U64 bytes,double begin,bool ok,const char* failure) {
     double seconds=Now()-begin;
     Progress(operation,name,bytes,seconds,true,ok);
+    const char* kind=operation[0]=='S' ? "Upload" : "Download";
+    if(ok) Log("%s %s, %I64u bytes in %.2f s (%.2f MiB/s)",kind,path,bytes,seconds,seconds>0 ? double(bytes)/1048576/seconds : 0);
+    else Log("%s %s FAILED after %I64u bytes: %s",kind,path,bytes,failure);
     char text[200];
     if(ok) _snprintf_s(text,sizeof(text),_TRUNCATE,"226 Transfer complete: %I64u bytes in %.2f s (%.2f MiB/s).",
         bytes,seconds,seconds>0 ? double(bytes)/1048576/seconds : 0);
@@ -362,7 +379,7 @@ void Session::Retrieve(const char* argument) {
         EndPump(pump); CloseHandle(file);
     }
     CloseData(data);
-    TransferDone("RETR",name,bytes,begin,ok,failure);
+    TransferDone("RETR",name,path,bytes,begin,ok,failure);
 }
 
 void Session::Store(const char* argument) {
@@ -425,10 +442,11 @@ void Session::Store(const char* argument) {
         if(!ok) DeleteFile(native);
     }
     CloseData(data);
-    TransferDone("STOR",name,bytes,begin,ok,failure);
+    TransferDone("STOR",name,path,bytes,begin,ok,failure);
 }
 
 void Session::Run() {
+    Log("Connected");
     Reply(shared_.user ? "220 NetBench360 FTP ready." : "220 NetBench360 FTP ready. Any user name and password.");
     char line[600];
     while(!Cancelled() && ReadCommand(line,sizeof(line))) {
@@ -442,11 +460,11 @@ void Session::Run() {
             strncpy_s(user_,argument,_TRUNCATE); loggedIn_=false; Reply("331 Password required.");
         }
         else if(!strcmp(verb,"PASS")) {
-            if(!shared_.user) { Reply("230 Logged in."); continue; }
+            if(!shared_.user) { Log("Logged in (no login required)"); Reply("230 Logged in."); continue; }
             loggedIn_=!strcmp(user_,shared_.user) && !strcmp(argument,shared_.password);
             // A short pause makes guessing passwords slow.
-            if(!loggedIn_) { Sleep(1000); Reply("530 Wrong user name or password."); }
-            else Reply("230 Logged in.");
+            if(!loggedIn_) { Log("Wrong user name or password (user %s)",user_); Sleep(1000); Reply("530 Wrong user name or password."); }
+            else { Log("Logged in as %s",user_); Reply("230 Logged in."); }
         }
         else if(!strcmp(verb,"QUIT")) { Reply("221 Goodbye."); break; }
         else if(!loggedIn_ && strcmp(verb,"SYST") && strcmp(verb,"FEAT") && strcmp(verb,"OPTS") && strcmp(verb,"NOOP"))
@@ -490,18 +508,29 @@ void Session::Run() {
         else if(!strcmp(verb,"DELE") || !strcmp(verb,"RMD") || !strcmp(verb,"XRMD") || !strcmp(verb,"MKD") || !strcmp(verb,"XMKD") || !strcmp(verb,"RNFR") || !strcmp(verb,"RNTO")) {
             int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
             if(root<0 || !shared_.roots[root].path || Depth(path)<2) { Reply("550 Not allowed here."); renameFrom_[0]=0; continue; }
-            if(!strcmp(verb,"DELE")) Reply(DeleteFile(native) ? "250 Deleted." : "550 Cannot delete.");
-            else if((verb[0]=='R' && verb[1]=='M') || !strcmp(verb,"XRMD")) Reply(RemoveDirectory(native) ? "250 Folder removed." : "550 Cannot remove the folder.");
+            if(!strcmp(verb,"DELE")) {
+                bool done=DeleteFile(native)!=0; Log(done ? "Deleted %s" : "Could not delete %s",path);
+                Reply(done ? "250 Deleted." : "550 Cannot delete.");
+            }
+            else if((verb[0]=='R' && verb[1]=='M') || !strcmp(verb,"XRMD")) {
+                bool done=RemoveDirectory(native)!=0; Log(done ? "Removed folder %s" : "Could not remove folder %s",path);
+                Reply(done ? "250 Folder removed." : "550 Cannot remove the folder.");
+            }
             else if(!strcmp(verb,"MKD") || !strcmp(verb,"XMKD")) {
-                if(CreateDirectory(native,NULL)) { _snprintf_s(text,sizeof(text),_TRUNCATE,"257 \"%s\" created.",path); Reply(text); }
+                if(CreateDirectory(native,NULL)) { Log("Created folder %s",path); _snprintf_s(text,sizeof(text),_TRUNCATE,"257 \"%s\" created.",path); Reply(text); }
                 else Reply("550 Cannot create the folder.");
             }
-            else if(!strcmp(verb,"RNFR")) { strcpy_s(renameFrom_,native); Reply("350 Ready for RNTO."); }
-            else { Reply(renameFrom_[0] && MoveFile(renameFrom_,native) ? "250 Renamed." : "550 Cannot rename."); renameFrom_[0]=0; }
+            else if(!strcmp(verb,"RNFR")) { strcpy_s(renameFrom_,native); strcpy_s(renamePath_,path); Reply("350 Ready for RNTO."); }
+            else {
+                bool done=renameFrom_[0] && MoveFile(renameFrom_,native);
+                if(done) Log("Renamed %s to %s",renamePath_,path);
+                Reply(done ? "250 Renamed." : "550 Cannot rename."); renameFrom_[0]=0;
+            }
         }
         else if(!strcmp(verb,"ABOR")) Reply("226 No transfer to abort.");
         else Reply("502 Command not implemented.");
     }
+    Log("Disconnected");
 }
 
 struct Client { Shared* shared; SOCKET socket; };

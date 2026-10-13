@@ -178,8 +178,16 @@ with tempfile.TemporaryDirectory() as temp:
         ftp.connect("127.0.0.1", port, timeout=20)
         ftp.login("marcus", "S3cret!=#")
         check("a user-chosen name and password log in", ftp.pwd() == "/")
+        ftp.storbinary("STOR /HDD/log.bin", io.BytesIO(b"hello"))
+        ftp.rename("/HDD/log.bin", "/HDD/log2.bin")
+        ftp.delete("/HDD/log2.bin")
         ftp.quit()
-        host.communicate(timeout=10)
+        output = host.communicate(timeout=10)[0]
+        log = [line[4:] for line in output.splitlines() if line.startswith("LOG ")]
+        expected = ["Connected", "Logged in as marcus", "Upload /HDD/log.bin, 5 bytes in", "Renamed /HDD/log.bin to /HDD/log2.bin",
+                    "Deleted /HDD/log2.bin", "Disconnected"]
+        check("the log records login, upload, rename, delete and disconnect with the client address",
+              len(log) == len(expected) and all(line.startswith("127.0.0.1  " + text) for line, text in zip(log, expected)))
 
     def login_file(text):
         path = Path(temp) / "FastFTP.ini"

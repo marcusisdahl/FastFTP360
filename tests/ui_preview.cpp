@@ -82,6 +82,9 @@ int main(int argc,char** argv) {
         state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=2; state.mebibytes=812.5; state.elapsed=31.2; state.rate=26.04;
         strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 USBMU0 USBMUCache0");
         strcpy_s(state.ftp,"Upload, 1024.0 MiB in 41.3 s: 24.79 MiB/s");
+        static const nb::UiTransfer recent[]={{"Halo 3 - Disc 1 (Title Update 12, all DLC included).iso",7120.4,27.48,1,1},
+            {"default.xex",14.2,21.37,0,1},{"FastFTP.log",0.006,0.9,0,1},{"backup.bin",388.0,0,1,0},{"Content.zip",1024.0,26.91,1,1}};
+        memcpy(state.recent,recent,sizeof(recent)); state.recentCount=5;
     } else if(!strcmp(scene,"ftpon")) {
         state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=1; state.focus=1;
         strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 USBMU0 USBMUCache0");

@@ -88,6 +88,34 @@ static int CompareRoots(const void* a,const void* b) {
     return _stricmp(static_cast<const nb::FtpRoot*>(a)->name,static_cast<const nb::FtpRoot*>(b)->name);
 }
 
+// FTP log, next to the XEX. Every line starts with the local date and time.
+// A log over 1 MiB is moved to FastFTP.old.log when the server starts.
+static const char LogFile[]="game:\\FastFTP.log",OldLogFile[]="game:\\FastFTP.old.log";
+static CRITICAL_SECTION LogLock;
+static void WriteLog(const char* text) {
+    SYSTEMTIME now; GetLocalTime(&now);
+    char line[800];
+    int length=_snprintf_s(line,sizeof(line),_TRUNCATE,"%04u-%02u-%02u %02u:%02u:%02u  %s\r\n",
+        now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond,text);
+    if(length<0) length=int(strlen(line));
+    EnterCriticalSection(&LogLock);
+    HANDLE file=CreateFile(LogFile,GENERIC_WRITE,FILE_SHARE_READ,NULL,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file!=INVALID_HANDLE_VALUE) {
+        SetFilePointer(file,0,NULL,FILE_END);
+        DWORD written=0; WriteFile(file,line,DWORD(length),&written,NULL);
+        CloseHandle(file);
+    }
+    LeaveCriticalSection(&LogLock);
+}
+static void FtpLog(void*,const char* line) { WriteLog(line); }
+static void RotateLog() {
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    if(!GetFileAttributesEx(LogFile,GetFileExInfoStandard,&info) || (!info.nFileSizeHigh && info.nFileSizeLow<1048576)) return;
+    EnterCriticalSection(&LogLock);
+    DeleteFile(OldLogFile); MoveFile(LogFile,OldLogFile);
+    LeaveCriticalSection(&LogLock);
+}
+
 static void LoadLogin() {
     HANDLE file=CreateFile(LoginFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) return;
@@ -320,7 +348,7 @@ static DWORD WINAPI DiskThread(void*) {
     LeaveCriticalSection(&StateLock);
     return 0;
 }
-static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,double seconds,bool done,bool ok) {
+static void FtpProgress(void*,const char* operation,const char* file,nb::U64 bytes,double seconds,bool done,bool ok) {
     EnterCriticalSection(&StateLock);
     double mib=double(bytes)/1048576,rate=seconds>0 ? mib/seconds : 0;
     const char* kind=operation[0]=='S' ? "Upload" : "Download";
@@ -328,6 +356,11 @@ static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,do
         State.ftpPhase=1;
         if(ok) _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"%s, %.1f MiB in %.1f s: %.2f MiB/s",kind,mib,seconds,rate);
         else _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"%s failed after %.1f MiB",kind,mib);
+        // Newest first in the last-transfers list.
+        memmove(&State.recent[1],&State.recent[0],sizeof(State.recent[0])*(nb::UiRecentTransfers-1));
+        nb::UiTransfer& entry=State.recent[0];
+        strcpy_s(entry.name,sizeof(entry.name),file); entry.mebibytes=mib; entry.rate=rate; entry.upload=operation[0]=='S'; entry.ok=ok;
+        if(State.recentCount<nb::UiRecentTransfers) ++State.recentCount;
     } else {
         State.ftpPhase=operation[0]=='S' ? 2 : 3; State.mebibytes=mib; State.elapsed=seconds; State.rate=rate;
     }
@@ -336,6 +369,7 @@ static void FtpProgress(void*,const char* operation,const char*,nb::U64 bytes,do
 // Passive-mode FTP server on port 21 until B. The top level matches Aurora's
 // FTP: the readable drives plus Game for the app's own drive, sorted by name.
 static DWORD WINAPI FtpThread(void*) {
+    RotateLog();
     nb::FtpRoot roots[FtpDriveCount+1]; int count=0; bool linked[FtpDriveCount]={false};
     for(int i=0;i<FtpDriveCount;++i) {
         _snprintf_s(FtpLinks[i],sizeof(FtpLinks[i]),_TRUNCATE,"\\??\\NB%s:",FtpDrives[i].name);
@@ -370,12 +404,18 @@ static DWORD WINAPI FtpThread(void*) {
         EnterCriticalSection(&StateLock);
         State.ftpPhase=1; State.phase=nb::Idle; State.ftp[0]=0; strcpy_s(State.message,folders);
         LeaveCriticalSection(&StateLock);
-        nb::FtpObserver observer={NULL,IsCancelled,FtpProgress};
+        nb::FtpObserver observer={NULL,IsCancelled,FtpProgress,FtpLog};
+        char line[200];
+        const BYTE* ip=reinterpret_cast<const BYTE*>(&xnaddr.ina);
+        _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP server started on %u.%u.%u.%u port 21, login %s. %s",ip[0],ip[1],ip[2],ip[3],FtpLoginRequired ? FtpUser : "off",folders);
+        WriteLog(line);
         if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],0,
             FtpLoginRequired ? FtpUser : NULL,FtpPassword,observer,error,sizeof(error))) ready=false;
     }
     if(listener!=INVALID_SOCKET) closesocket(listener);
     for(int i=0;i<FtpDriveCount;++i) if(linked[i]) UnlinkDrive(FtpLinks[i]);
+    if(!ready && !IsCancelled(NULL)) { char line[160]; _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP server error: %s",error[0] ? error : "unknown"); WriteLog(line); }
+    else WriteLog("FTP server stopped");
     EnterCriticalSection(&StateLock); State.ftpPhase=0; State.armed=0; LeaveCriticalSection(&StateLock);
     if(!ready && !IsCancelled(NULL)) Failure(error[0] ? error : "FTP server failed.");
     else { EnterCriticalSection(&StateLock); State.phase=nb::Stopped; strcpy_s(State.message,"FTP server stopped."); LeaveCriticalSection(&StateLock); }
@@ -452,6 +492,7 @@ static void PollKeyboard() {
     EnterCriticalSection(&StateLock);
     strcpy_s(FtpUser,PendingUser); strcpy_s(FtpPassword,text); FtpLoginRequired=true; DescribeSettings();
     LeaveCriticalSection(&StateLock);
+    char line[80]; _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP login changed on the Xbox (user %s)",PendingUser); WriteLog(line);
     LoginMessage(SaveLogin() ? "Login changed and saved in FastFTP.ini." : "Login changed, but FastFTP.ini could not be saved.");
 }
 
@@ -474,7 +515,7 @@ static void Render(const nb::UiState& state,float seconds) {
     Device->Present(NULL,NULL,NULL,NULL);
 }
 void __cdecl main() {
-    InitializeCriticalSection(&StateLock);
+    InitializeCriticalSection(&StateLock); InitializeCriticalSection(&LogLock);
     for(int i=0;i<nb::MaxStreams;++i) { Streams[i].thread=NULL; Streams[i].socket=INVALID_SOCKET; }
     LoadLogin();
     DescribeSettings();

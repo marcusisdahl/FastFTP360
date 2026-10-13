@@ -3,6 +3,9 @@
 namespace nb {
 // FTP server first: it is the tab the app opens on.
 enum UiTab { TabFtp, TabNetwork, TabDisk, TabCount };
+// One finished FTP transfer for the "last transfers" list.
+struct UiTransfer { char name[64]; double mebibytes,rate; int upload,ok; };
+enum { UiRecentTransfers = 5 };
 struct UiState {
     char ip[48],message[100],disk[100],ftp[100];
     // Current setting values as shown; main.cpp owns the choices.
@@ -11,6 +14,8 @@ struct UiState {
     char ftpUser[24],ftpPassword[24];
     int phase,direction,duration,armed,completed,streams,rateLimit,options,downloadLimit,diskPhase,ftpPhase;
     int tab,focus,busy,keyboard;
+    // Newest first; recentCount of them are filled in.
+    UiTransfer recent[UiRecentTransfers]; int recentCount;
     double elapsed,rate,upload,download,mebibytes,diskTotal;
     UiState();
 };
