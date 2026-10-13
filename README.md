@@ -123,6 +123,8 @@ The network test measures raw TCP speed between the PC and the Xbox's memory, wi
 2. On the PC, run `NetBench360-PC.exe` and enter the Xbox IP.
 3. Pick a direction, duration and number of streams, then start the test.
 
+<p align="center"><img src="docs/images/screen-pc-app.png" alt="NetBench360-PC.exe, the network test's PC app" width="640"></p>
+
 The PC app can run 1, 2 or 4 TCP streams, check every byte (**All data**), limit the Xbox's send rate, and save results to CSV. Each stream first checks 1 MiB of known data and warms up with 32 MiB, then runs the timed transfer. The receiver reports the final rate. Use the PC app from the same release as the XEX. Versions with a different protocol are rejected.
 
 The Xbox send limit applies **per stream**. While data moves, the Xbox holds a still screen by default and the PC shows live progress. B still stops the test.
