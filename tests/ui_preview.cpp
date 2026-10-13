@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Rasterize the exact Xbox screen for visual review without the Xbox graphics API.
 // Draws Dear ImGui's triangles in software and writes a 1280x720 BMP.
-// Usage: ui-preview out.bmp [idle|run|disk|ftp|ftpon|error|net|settings]
+// Usage: ui-preview out.bmp [idle|run|disk|ftp|ftpon|error|net|diskidle|settings]
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <string.h>
@@ -86,13 +86,18 @@ int main(int argc,char** argv) {
             {"default.xex",14.2,21.37,0,1},{"FastFTP.log",0.006,0.9,0,1},{"backup.bin",388.0,0,1,0},{"Content.zip",1024.0,26.91,1,1}};
         memcpy(state.recent,recent,sizeof(recent)); state.recentCount=5;
     } else if(!strcmp(scene,"ftpon")) {
-        state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=1; state.focus=1;
-        strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 USBMU0 USBMUCache0");
+        state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=1; state.focus=0;
+        strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 Usb1 USBMU0 USBMU1 USBMUCache0 USBMUCache1");
+        static const nb::UiTransfer recent[]={{"default.xex",14.2,21.37,0,1},{"Content.zip",1024.0,26.91,1,1}};
+        memcpy(state.recent,recent,sizeof(recent)); state.recentCount=2;
     } else if(!strcmp(scene,"error")) {
         state.tab=nb::TabNetwork; state.phase=7; state.focus=1;
         strcpy_s(state.message,"Receive failed during warm-up (10054). Check the cable and press A to listen again.");
     } else if(!strcmp(scene,"net")) {
         state.tab=nb::TabNetwork;
+    } else if(!strcmp(scene,"diskidle")) {
+        state.tab=nb::TabDisk; state.focus=0;
+        strcpy_s(state.disk,"HDD, 1024 KiB blocks: write 57.52, read 57.21 MiB/s, all data checked");
     } else if(!strcmp(scene,"settings")) {
         state.tab=nb::TabSettings; state.focus=2;
     } else { state.phase=0; state.download=0; }

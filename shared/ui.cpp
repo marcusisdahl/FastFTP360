@@ -104,7 +104,7 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
             static char login[80];
             if(s.ftpUser[0]) _snprintf_s(login,sizeof(login),_TRUNCATE,"Passive mode. User %s, password %s.",s.ftpUser,s.ftpPassword);
             else strcpy_s(login,"Passive mode, any user name and password.");
-            lines[0]=text; lines[1]=login; lines[2]=s.message;
+            lines[0]=text; lines[1]=login;
         } else {
             lines[0]="Lists the drives the way Aurora's FTP does:";
             lines[1]="Game, Hdd1, HddX, SysExt, System, Usb0, USBMU0...";
@@ -136,7 +136,11 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
         Text(Body,x,detail,Hex(Muted),(s.options&1) ? "Drawing paused during the transfer. B still stops." : text);
     }
     else if(s.message[0] && s.ftpPhase!=1) List->AddText(Body,Body->FontSize,ImVec2(x,y+60),Hex(error ? Error : White),s.message,NULL,w);
-    else for(int i=0;i<3 && lines[i];++i) Text(Body,x,y+60+i*38,Hex(White),lines[i]);
+    else {
+        for(int i=0;i<3 && lines[i];++i) Text(Body,x,y+60+i*38,Hex(White),lines[i]);
+        // The running FTP server's folder list can be long, so it wraps.
+        if(s.tab==TabFtp && s.ftpPhase==1 && s.message[0]) List->AddText(Small,Small->FontSize,ImVec2(x,y+60+2*38+4),Hex(Muted),s.message,NULL,w);
+    }
     if(fraction>=0) Progress(x,y+h-72,w,fraction);
 }
 
@@ -258,11 +262,13 @@ void DrawUi(const UiState& s) {
 
     // Header: name and version, then the address to type into the PC app.
     Box(Left,Top+6,6,40,Hex(Green),3);
-    Text(Heading,Left+20,Top,Hex(White),"NetBench360");
-    Text(Small,Left+20+Width(Heading,"NetBench360")+16,Top+14,Hex(Muted),"Network, disk and FTP diagnostics  v0.4.0");
+    Text(Heading,Left+20,Top,Hex(White),"FastFTP");
+    Text(Small,Left+20+Width(Heading,"FastFTP")+16,Top+14,Hex(Muted),"FTP server with network and disk tests  v0.4.0");
     bool online=strchr(s.ip,'.')!=NULL;
     TextRight(Heading,Right,Top,Hex(online ? White : Muted),s.ip);
-    _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  port %d",online ? "Xbox IP" : "No address yet",s.tab==TabNetwork ? 36020 : 21);
+    // The port only matters on the tabs that listen for the PC.
+    if(s.tab==TabFtp || s.tab==TabNetwork) _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  port %d",online ? "Xbox IP" : "No address yet",s.tab==TabNetwork ? 36020 : 21);
+    else strcpy_s(text,online ? "Xbox IP" : "No address yet");
     TextRight(Small,Right,Top+46,Hex(Muted),text);
     List->AddCircleFilled(ImVec2(Right-Width(Small,text)-14,Top+57),5,Hex(online ? Green : ButtonY),12);
 

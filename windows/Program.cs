@@ -19,7 +19,7 @@ namespace NetBench360 {
         readonly List<TestResult> results=new List<TestResult>();
         CancellationTokenSource cancellation; bool running,closeRequested; int testSeconds,activeLimit;
         public MainForm() {
-            Text="NetBench360 v0.2.0 - diagnostic benchmark"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
+            Text="FastFTP network benchmark (NetBench360 v0.4.0)"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
             StartPosition=FormStartPosition.CenterScreen; BackColor=navy; ForeColor=ink; Font=new Font("Segoe UI",10);
             AutoScaleMode=AutoScaleMode.Dpi;
             LabelAt("NETBENCH360",26,20,520,40,24,FontStyle.Bold);
@@ -32,7 +32,7 @@ namespace NetBench360 {
             LabelAt("PC SOCKET BUFFERS",28,195,190,22,9); buffers=Choice(new[]{"16 KiB","32 KiB","64 KiB","128 KiB","Windows automatic"},28,219,190,2);
             LabelAt("XBOX SEND LIMIT",236,195,210,22,9); limits=Choice(new[]{"8 MiB/s","12 MiB/s","16 MiB/s","20 MiB/s","24 MiB/s","32 MiB/s","Unlimited"},236,219,210,2);
             pauseDrawing=new CheckBox { Text="Pause Xbox drawing during test",Left=464,Top=219,Width=290,Height=28,Checked=true,ForeColor=ink,BackColor=navy }; Controls.Add(pauseDrawing);
-            LabelAt("Xbox D-pad sets its buffers and CPU. Actual sizes in CSV.",764,214,258,44,9);
+            LabelAt("Xbox buffers and CPU: Settings tab. Actual sizes in CSV.",764,214,258,44,9);
             LabelAt("TCP STREAMS",354,256,150,18,8); streams=Choice(new[]{"1 stream","2 streams","4 streams"},354,276,150,0);
             LabelAt("DATA CHECK",522,256,170,18,8); check=Choice(new[]{"First 1 MiB","All data"},522,276,170,0);
             LabelAt("The send limit applies to each stream.",710,276,160,40,8);

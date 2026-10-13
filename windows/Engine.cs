@@ -151,7 +151,7 @@ namespace NetBench360 {
             SendAll(request,40); byte[] response=new byte[32]; ReceiveAll(response);
             if(Read32(response,0)!=Magic || Read32(response,4)!=Version || Read32(response,8)!=0 ||
                 Read32(response,12)!=Chunk || Read32(response,24)!=Integrity || Read32(response,28)!=warmupMiB)
-                throw new InvalidOperationException("The Xbox rejected the request, or is running a different protocol version. Update BOTH apps to v0.2.0.");
+                throw new InvalidOperationException("The Xbox rejected the request, or is running a different protocol version. Update BOTH apps to the same release.");
             byte[] settings=new byte[8]; ReceiveAll(settings);
             if(Read32(settings,0)!=activeLimit || Read32(settings,4)!=options)
                 throw new InvalidOperationException("Xbox diagnostic settings did not match the request.");
