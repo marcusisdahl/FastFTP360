@@ -71,7 +71,7 @@ int main(int argc,char** argv) {
     nb::UiState state; const char* scene=argc>2 ? argv[2] : "idle";
     strcpy_s(state.ip,"192.168.1.50");
     strcpy_s(state.buffers,"Startup default (64 KiB)"); strcpy_s(state.cpu,"Automatic");
-    strcpy_s(state.diskTarget,"HDD"); strcpy_s(state.diskBlock,"1 MiB");
+    strcpy_s(state.diskTarget,"HDD"); strcpy_s(state.diskBlock,"1 MiB"); strcpy_s(state.drawing,"Paused");
     state.upload=27.34; state.download=24.16;
     if(!strcmp(scene,"run")) {
         state.armed=1; state.busy=1; state.phase=5; state.direction=1; state.rate=27.48; state.elapsed=6.4; state.mebibytes=175.9; state.streams=2;

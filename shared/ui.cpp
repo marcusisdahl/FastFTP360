@@ -10,9 +10,9 @@ namespace nb {
 UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),
     tab(0),focus(0),busy(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
-    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0;
+    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0;
 }
-int SettingCount(int tab) { return tab==TabFtp ? 1 : 2; }
+int SettingCount(int tab) { return tab==TabNetwork ? 3 : 2; }
 
 static ImFont* Small; static ImFont* Body; static ImFont* Heading; static ImFont* Hero;
 enum { Left=64, Right=1216, Top=36, Bottom=684 };
@@ -118,7 +118,10 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
     bool error=s.phase==7 && !s.busy;
     Text(Heading,x,y,Hex(error ? Error : Green),title);
     bool live=(s.tab==TabNetwork && (s.phase==5 || s.phase==6)) || (s.tab==TabDisk && s.diskPhase) || (s.tab==TabFtp && s.ftpPhase>1);
-    if(live) { Rate(x-4,y+50,s.rate); Text(Body,x,y+h-112,Hex(Muted),text); }
+    if(live) {
+        Rate(x-4,y+50,s.rate);
+        Text(Body,x,y+h-112,Hex(Muted),(s.options&1) ? "Drawing paused during the transfer. B still stops." : text);
+    }
     else if(s.message[0] && s.ftpPhase!=1) List->AddText(Body,Body->FontSize,ImVec2(x,y+60),Hex(error ? Error : White),s.message,NULL,w);
     else for(int i=0;i<3 && lines[i];++i) Text(Body,x,y+60+i*38,Hex(White),lines[i]);
     if(fraction>=0) Progress(x,y+h-72,w,fraction);
@@ -128,17 +131,18 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
 static void Settings(const UiState& s,float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+24,Hex(Muted),s.busy ? "SETTINGS  (STOP TO CHANGE)" : "SETTINGS");
-    const char* labels[2]; const char* values[2]; int rows=SettingCount(s.tab);
+    const char* labels[3]; const char* values[3]; int rows=SettingCount(s.tab);
     if(s.tab==TabDisk) { labels[0]="Drive"; values[0]=s.diskTarget; labels[1]="Block size"; values[1]=s.diskBlock; }
-    else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; }
+    else if(s.tab==TabFtp) { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Drawing during transfers"; values[1]=s.drawing; }
+    else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing; }
     for(int i=0;i<rows;++i) {
-        float top=y+64+i*86; bool focused=!s.busy && i==s.focus;
-        if(focused) { Box(x+16,top,w-32,74,Hex(Raised),10); Box(x+16,top+12,5,50,Hex(Green),2); }
-        Text(Small,x+36,top+8,Hex(s.busy ? Dim : Muted),labels[i]);
-        Text(Body,x+36,top+36,Hex(s.busy ? Dim : White),values[i]);
+        float top=y+56+i*70; bool focused=!s.busy && i==s.focus;
+        if(focused) { Box(x+16,top,w-32,64,Hex(Raised),10); Box(x+16,top+10,5,44,Hex(Green),2); }
+        Text(Small,x+36,top+5,Hex(s.busy ? Dim : Muted),labels[i]);
+        Text(Body,x+36,top+30,Hex(s.busy ? Dim : White),values[i]);
         if(focused) {
-            TextRight(Heading,x+w-36,top+18,Hex(Green),">");
-            TextRight(Heading,x+w-36-Width(Heading,">")-14,top+18,Hex(Green),"<");
+            TextRight(Heading,x+w-36,top+12,Hex(Green),">");
+            TextRight(Heading,x+w-36-Width(Heading,">")-14,top+12,Hex(Green),"<");
         }
     }
 }

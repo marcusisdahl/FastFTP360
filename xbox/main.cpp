@@ -23,6 +23,9 @@ static int BufferChoice=0;
 // Hardware thread for stream workers: 0 lets the kernel choose, otherwise 1-6
 // selects hardware thread 0-5. USB completion DPCs run on hardware thread 2.
 static int CpuChoice=0;
+// Whether to keep drawing while data moves. Off by default: drawing during
+// Xbox sends has preceded console crashes, so the screen is held instead.
+static bool DrawDuringTransfers=false;
 
 // Disk test targets. The app's own drive needs no mount; the others are linked
 // to their kernel device for the test and unlinked afterwards.
@@ -79,6 +82,7 @@ static void DescribeSettings() {
     strcpy_s(State.diskTarget,DiskTargets[DiskChoice].name);
     if(DiskBlocks[DiskBlockChoice]>=1048576) _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u MiB",DiskBlocks[DiskBlockChoice]/1048576);
     else _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u KiB",DiskBlocks[DiskBlockChoice]/1024);
+    strcpy_s(State.drawing,DrawDuringTransfers ? "Live" : "Paused");
 }
 // Steps the focused setting on the current tab by one choice (D-pad left/right).
 static void ChangeSetting(int tab,int row,int step) {
@@ -87,7 +91,8 @@ static void ChangeSetting(int tab,int row,int step) {
     if(tab==nb::TabDisk) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
     } else if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
-    else CpuChoice=(CpuChoice+7+step)%7;
+    else if(tab==nb::TabNetwork && row==1) CpuChoice=(CpuChoice+7+step)%7;
+    else DrawDuringTransfers=!DrawDuringTransfers;
 }
 static bool IsCancelled(void*) { return InterlockedCompareExchange(&Cancel,0,0)!=0; }
 // Called with StateLock held: combine every running stream into the screen state.
@@ -452,9 +457,13 @@ void __cdecl main() {
         EnterCriticalSection(&StateLock); nb::UiState snapshot=State; LeaveCriticalSection(&StateLock);
         snapshot.busy=Worker!=NULL;
         const double now=nb::Now(); const float seconds=float(now-lastFrame); lastFrame=now;
-        if(snapshot.armed && (snapshot.options&nb::PauseDrawing)) {
+        // Hold one static frame while data moves if the PC asked for it, or
+        // unless drawing during transfers is switched on.
+        const bool transfer=snapshot.ftpPhase>1 || (snapshot.armed && !snapshot.ftpPhase && snapshot.phase>=nb::Connecting && snapshot.phase<=nb::Measuring);
+        if(snapshot.armed && ((snapshot.options&nb::PauseDrawing) || (transfer && !DrawDuringTransfers))) {
             if(!renderingPaused) {
-                strcpy_s(snapshot.message,"Drawing paused. The PC shows live progress. B still stops.");
+                snapshot.options|=nb::PauseDrawing;
+                strcpy_s(snapshot.message,"Drawing paused during the transfer. B still stops.");
                 Render(snapshot,seconds); Device->BlockUntilIdle(); renderingPaused=true;
             }
             if(GraphicsIdle) SetEvent(GraphicsIdle);
