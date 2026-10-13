@@ -24,7 +24,7 @@ You need a console that can run homebrew XEX applications, a working network con
 
 1. Obtain a build of `NetBench360.xex`, or [build it from this source](#build-from-source). Copy it into its own application folder, for example `Hdd1:\Apps\FastFTP\`.
 2. Launch the XEX through Aurora, XeXMenu, or your usual homebrew launcher. Keep it running while transferring files. **Do not add this application to launch.ini as a plugin.**
-3. Switch to the **FTP server** tab with **LB**/**RB** and press **A**. Read the IP address shown on the Xbox screen.
+3. The app opens on the **FTP server** tab. Press **A** to start the server. Read the IP address shown on the Xbox screen.
 4. Connect your FTP client with these settings:
 
    | Setting | Value |

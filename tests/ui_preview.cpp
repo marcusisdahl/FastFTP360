@@ -74,7 +74,7 @@ int main(int argc,char** argv) {
     strcpy_s(state.diskTarget,"HDD"); strcpy_s(state.diskBlock,"1 MiB"); strcpy_s(state.drawing,"Paused"); strcpy_s(state.ftpUser,"xboxftp"); strcpy_s(state.ftpPassword,"xboxftp");
     state.upload=27.34; state.download=24.16;
     if(!strcmp(scene,"run")) {
-        state.armed=1; state.busy=1; state.phase=5; state.direction=1; state.rate=27.48; state.elapsed=6.4; state.mebibytes=175.9; state.streams=2;
+        state.tab=nb::TabNetwork; state.armed=1; state.busy=1; state.phase=5; state.direction=1; state.rate=27.48; state.elapsed=6.4; state.mebibytes=175.9; state.streams=2;
     } else if(!strcmp(scene,"disk")) {
         state.tab=nb::TabDisk; state.busy=1; state.diskPhase=1; state.diskTotal=256; state.mebibytes=96; state.elapsed=3.1; state.rate=30.97;
         strcpy_s(state.disk,"USB 0, 64 KiB blocks: write 8.52, read 24.10 MiB/s, all data checked");
@@ -86,7 +86,7 @@ int main(int argc,char** argv) {
         state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=1; state.focus=1;
         strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 USBMU0 USBMUCache0");
     } else if(!strcmp(scene,"error")) {
-        state.phase=7; state.focus=1;
+        state.tab=nb::TabNetwork; state.phase=7; state.focus=1;
         strcpy_s(state.message,"Receive failed during warm-up (10054). Check the cable and press A to listen again.");
     } else { state.phase=0; state.download=0; }
     ImGui::GetIO().DeltaTime=1.0f/60;

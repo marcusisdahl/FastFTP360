@@ -179,7 +179,7 @@ static void Footer(const UiState& s,float y) {
     if(s.busy) x=Button(x,y,"B",ButtonB,s.tab==TabFtp ? "Stop server" : "Stop");
     else if(s.keyboard) Text(Body,x,y+1,Hex(Muted),"Type the FTP user name, then the password.");
     else {
-        static const char* start[]={"Listen","Run disk test","Start FTP server"};
+        static const char* start[]={"Start FTP server","Listen","Run disk test"};
         x=Button(x,y,"A",ButtonA,start[s.tab]);
         if(s.tab==TabFtp) x=Button(x,y,"Y",ButtonY,"Set login");
         x=Button(x,y,"D-pad",0,"Settings");
@@ -206,7 +206,7 @@ void DrawUi(const UiState& s) {
     List->AddCircleFilled(ImVec2(Right-Width(Small,text)-14,Top+57),5,Hex(online ? Green : ButtonY),12);
 
     // Tabs, switched with the bumpers while nothing runs.
-    static const char* tabs[]={"Network","Disk","FTP server"};
+    static const char* tabs[]={"FTP server","Network","Disk"};
     float x=Left,y=118;
     if(!s.busy) { Box(x,y+6,40,30,Hex(Raised),8); Text(Small,x+8,y+9,Hex(White),"LB"); x+=52; }
     for(int i=0;i<TabCount;++i) {

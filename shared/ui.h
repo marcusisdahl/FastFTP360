@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 namespace nb {
-enum UiTab { TabNetwork, TabDisk, TabFtp, TabCount };
+// FTP server first: it is the tab the app opens on.
+enum UiTab { TabFtp, TabNetwork, TabDisk, TabCount };
 struct UiState {
     char ip[48],message[100],disk[100],ftp[100];
     // Current setting values as shown; main.cpp owns the choices.

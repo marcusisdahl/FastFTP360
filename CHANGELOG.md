@@ -3,8 +3,9 @@
 ## 0.4.0
 
 - **Your own FTP login**: press **Y** on the FTP server tab to type a user name and password with the Xbox keyboard (1-23 characters, no spaces). The login and the Login on/off setting are saved in `FastFTP.ini` next to the XEX, which can also be edited on a PC. Without the file the login is `xboxftp` / `xboxftp`. Four new checks in `tests/ftp.py`.
+- The app opens on the **FTP server** tab, now the first tab.
 - The Xbox screen is drawn with **Dear ImGui 1.86** (the last release that supports the VS2010-era Xbox compiler) and an embedded Roboto font, replacing the 5x7 bitmap font.
-- **Tabs** for Network, Disk and FTP server, switched with **LB**/**RB** while stopped. Each tab shows its own live rate, progress and last result. **A** starts the tab's action, **B** stops, **Back** exits.
+- **Tabs** for FTP server, Network and Disk, switched with **LB**/**RB** while stopped. Each tab shows its own live rate, progress and last result. **A** starts the tab's action, **B** stops, **Back** exits.
 - A **settings panel** per tab: D-pad Up/Down picks a setting, Left/Right changes it. Settings are locked while something runs.
 - New setting **Drawing during transfers** (Network and FTP tabs), **Paused** by default: the screen holds one frame while data moves, as with the PC's "Pause Xbox drawing". The first console run of this prototype crashed about 5 seconds into Xbox sends (FTP and Xbox-to-PC) with live drawing.
 - **FTP login**: user `xboxftp`, password `xboxftp` by default. The FTP tab's **Login** setting can switch it off (any user, as before). Wrong passwords get `530` after a one-second pause, and other commands are refused until login. Three new checks in `tests/ftp.py`.
