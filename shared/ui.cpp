@@ -10,9 +10,9 @@ namespace nb {
 UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),
     tab(0),focus(0),busy(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
-    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0;
+    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
 }
-int SettingCount(int tab) { return tab==TabNetwork ? 3 : 2; }
+int SettingCount(int tab) { return tab==TabDisk ? 2 : 3; }
 
 static ImFont* Small; static ImFont* Body; static ImFont* Heading; static ImFont* Hero;
 enum { Left=64, Right=1216, Top=36, Bottom=684 };
@@ -93,11 +93,14 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
         if(s.ftpPhase>1) _snprintf_s(text,sizeof(text),_TRUNCATE,"%.1f MiB  /  %.1f s",s.mebibytes,s.elapsed);
         else if(s.ftpPhase==1) {
             _snprintf_s(text,sizeof(text),_TRUNCATE,"Connect to %s on port 21.",s.ip);
-            lines[0]=text; lines[1]="Passive mode, any user name and password."; lines[2]=s.message;
+            static char login[80];
+            if(s.ftpUser[0]) _snprintf_s(login,sizeof(login),_TRUNCATE,"Passive mode. User %s, password %s.",s.ftpUser,s.ftpPassword);
+            else strcpy_s(login,"Passive mode, any user name and password.");
+            lines[0]=text; lines[1]=login; lines[2]=s.message;
         } else {
             lines[0]="Serves the HDD, USB drives and the app drive, plus a";
             lines[1]="NULL folder that measures the network without a disk.";
-            lines[2]="No password. Use it only on a trusted network.";
+            lines[2]=s.ftpUser[0] ? "Not encrypted. Use it only on a trusted network." : "No password. Use it only on a trusted network.";
         }
     } else {
         title=PhaseName(s.armed || s.phase>=6 ? s.phase : 0);
@@ -131,9 +134,13 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
 static void Settings(const UiState& s,float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+24,Hex(Muted),s.busy ? "SETTINGS  (STOP TO CHANGE)" : "SETTINGS");
-    const char* labels[3]; const char* values[3]; int rows=SettingCount(s.tab);
+    const char* labels[3]; const char* values[3]; int rows=SettingCount(s.tab); char login[56];
     if(s.tab==TabDisk) { labels[0]="Drive"; values[0]=s.diskTarget; labels[1]="Block size"; values[1]=s.diskBlock; }
-    else if(s.tab==TabFtp) { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Drawing during transfers"; values[1]=s.drawing; }
+    else if(s.tab==TabFtp) {
+        if(s.ftpUser[0]) _snprintf_s(login,sizeof(login),_TRUNCATE,"%s / %s",s.ftpUser,s.ftpPassword); else strcpy_s(login,"Off, any user");
+        labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Login (user / password)"; values[1]=login;
+        labels[2]="Drawing during transfers"; values[2]=s.drawing;
+    }
     else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing; }
     for(int i=0;i<rows;++i) {
         float top=y+56+i*70; bool focused=!s.busy && i==s.focus;

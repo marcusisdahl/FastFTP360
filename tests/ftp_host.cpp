@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Runs the SAME FTP server source on Windows loopback for protocol tests.
-// Usage: ftp-host <port> <folder served as /HDD> <sessions>
+// Usage: ftp-host <port> <folder served as /HDD> <sessions> [user password]
 #include "../shared/ftp.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +22,7 @@ int main(int argc,char** argv) {
     nb::FtpObserver observer={NULL,Cancelled,Progress};
     printf("READY %s\n",argv[1]); fflush(stdout);
     Started=nb::Now();
-    bool ok=nb::ServeFtp(listener,roots,2,htonl(INADDR_LOOPBACK),0,atoi(argv[3]),observer,error,sizeof(error));
+    bool ok=nb::ServeFtp(listener,roots,2,htonl(INADDR_LOOPBACK),0,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));
     printf(ok ? "STOPPED\n" : "ERROR %s\n",error);
     closesocket(listener); WSACleanup(); return ok ? 0 : 3;
 }

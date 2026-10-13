@@ -22,7 +22,7 @@ NetBench360 uses the console's existing network route. To measure a USB Ethernet
 
 ## FTP server (Xbox)
 
-A small built-in FTP server for comparing with Aurora's FTP using the same driver, drive and PC. With the Xbox app stopped, switch to the **FTP server** tab with **LB**/**RB** and press **A**. The screen shows the folders and the address; connect an FTP client to that IP on port **21** in **passive mode**, with any user name and password. **B** stops the server.
+A small built-in FTP server for comparing with Aurora's FTP using the same driver, drive and PC. With the Xbox app stopped, switch to the **FTP server** tab with **LB**/**RB** and press **A**. The screen shows the folders and the address; connect an FTP client to that IP on port **21** in **passive mode**, with user name **xboxftp** and password **xboxftp**. The **Login** setting on the FTP tab can switch the login off so any user name and password work. **B** stops the server.
 
 - `HDD`, `USB0`, `USB1`: the internal drive and USB drives that are present. `APP`: the drive NetBench360 was launched from.
 - `NULL`: uploads are discarded, and downloading `NULL/64MB.bin`, `NULL/256MB.bin` or any `NULL/<n>MB.bin` (1-4096) streams test data. This measures FTP over the network without the drive.
@@ -30,7 +30,7 @@ A small built-in FTP server for comparing with Aurora's FTP using the same drive
 
 Suggested comparison, same file and PC each time: upload to `NULL`, then to `HDD`, then to the USB drive; download `NULL/1024MB.bin`, then a file from `HDD`. Compare with the same transfers through Aurora. `NULL` close to the RAM benchmark means the FTP code is not the limit; `HDD` well below `NULL` points at the drive.
 
-There is **no authentication or encryption**, as with the benchmark listener. Use it only on a trusted LAN and stop it with B when finished. It can delete and overwrite files on the drives it lists.
+The login is a fixed, well-known default and nothing is **encrypted**, so it only keeps out accidental connections. Use it only on a trusted LAN and stop it with B when finished. It can delete and overwrite files on the drives it lists.
 
 ## Disk test (Xbox only)
 

@@ -26,6 +26,9 @@ static int CpuChoice=0;
 // Whether to keep drawing while data moves. Off by default: drawing during
 // Xbox sends has preceded console crashes, so the screen is held instead.
 static bool DrawDuringTransfers=false;
+// FTP login. Required by default; switching it off lets any user name in.
+static bool FtpLoginRequired=true;
+static const char FtpUser[]="xboxftp",FtpPassword[]="xboxftp";
 
 // Disk test targets. The app's own drive needs no mount; the others are linked
 // to their kernel device for the test and unlinked afterwards.
@@ -83,6 +86,7 @@ static void DescribeSettings() {
     if(DiskBlocks[DiskBlockChoice]>=1048576) _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u MiB",DiskBlocks[DiskBlockChoice]/1048576);
     else _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u KiB",DiskBlocks[DiskBlockChoice]/1024);
     strcpy_s(State.drawing,DrawDuringTransfers ? "Live" : "Paused");
+    strcpy_s(State.ftpUser,FtpLoginRequired ? FtpUser : ""); strcpy_s(State.ftpPassword,FtpLoginRequired ? FtpPassword : "");
 }
 // Steps the focused setting on the current tab by one choice (D-pad left/right).
 static void ChangeSetting(int tab,int row,int step) {
@@ -92,6 +96,7 @@ static void ChangeSetting(int tab,int row,int step) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
     } else if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
     else if(tab==nb::TabNetwork && row==1) CpuChoice=(CpuChoice+7+step)%7;
+    else if(tab==nb::TabFtp && row==1) FtpLoginRequired=!FtpLoginRequired;
     else DrawDuringTransfers=!DrawDuringTransfers;
 }
 static bool IsCancelled(void*) { return InterlockedCompareExchange(&Cancel,0,0)!=0; }
@@ -320,7 +325,8 @@ static DWORD WINAPI FtpThread(void*) {
         State.ftpPhase=1; State.phase=nb::Idle; State.ftp[0]=0; strcpy_s(State.message,folders);
         LeaveCriticalSection(&StateLock);
         nb::FtpObserver observer={NULL,IsCancelled,FtpProgress};
-        if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],0,observer,error,sizeof(error))) ready=false;
+        if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],0,
+            FtpLoginRequired ? FtpUser : NULL,FtpPassword,observer,error,sizeof(error))) ready=false;
     }
     if(listener!=INVALID_SOCKET) closesocket(listener);
     for(int i=0;i<3;++i) if(linked[i]) UnlinkDrive(FtpDrives[i].link);

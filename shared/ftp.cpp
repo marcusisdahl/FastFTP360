@@ -69,6 +69,7 @@ void EndPump(Pump& p) {
 
 struct Shared {
     const FtpRoot* roots; int rootCount; DWORD address; int socketBuffer;
+    const char* user; const char* password;
     const FtpObserver* observer;
     volatile LONG active,finished;
 };
@@ -79,10 +80,12 @@ class Session {
     Shared& shared_;
     SOCKET control_,passive_;
     char cwd_[512],input_[1024],renameFrom_[512];
+    char user_[64];
     int inputCount_;
+    bool loggedIn_;
 public:
-    Session(Shared& shared,SOCKET control) : shared_(shared),control_(control),passive_(INVALID_SOCKET),inputCount_(0) {
-        strcpy_s(cwd_,"/"); renameFrom_[0]=0;
+    Session(Shared& shared,SOCKET control) : shared_(shared),control_(control),passive_(INVALID_SOCKET),inputCount_(0),loggedIn_(!shared.user) {
+        strcpy_s(cwd_,"/"); renameFrom_[0]=0; user_[0]=0;
     }
     ~Session() { ClosePassive(); }
     void Run();
@@ -424,7 +427,7 @@ void Session::Store(const char* argument) {
 }
 
 void Session::Run() {
-    Reply("220 NetBench360 FTP ready. Any user name and password.");
+    Reply(shared_.user ? "220 NetBench360 FTP ready." : "220 NetBench360 FTP ready. Any user name and password.");
     char line[600];
     while(!Cancelled() && ReadCommand(line,sizeof(line))) {
         char verb[8]={0}; const char* argument=line;
@@ -432,8 +435,20 @@ void Session::Run() {
         while(*argument && *argument!=' ') ++argument;
         while(*argument==' ') ++argument;
         char native[600],name[300],path[600],text[700];
-        if(!strcmp(verb,"USER")) Reply("331 Any password will do.");
-        else if(!strcmp(verb,"PASS")) Reply("230 Logged in.");
+        if(!strcmp(verb,"USER")) {
+            if(!shared_.user) { Reply("331 Any password will do."); continue; }
+            strncpy_s(user_,argument,_TRUNCATE); loggedIn_=false; Reply("331 Password required.");
+        }
+        else if(!strcmp(verb,"PASS")) {
+            if(!shared_.user) { Reply("230 Logged in."); continue; }
+            loggedIn_=!strcmp(user_,shared_.user) && !strcmp(argument,shared_.password);
+            // A short pause makes guessing passwords slow.
+            if(!loggedIn_) { Sleep(1000); Reply("530 Wrong user name or password."); }
+            else Reply("230 Logged in.");
+        }
+        else if(!strcmp(verb,"QUIT")) { Reply("221 Goodbye."); break; }
+        else if(!loggedIn_ && strcmp(verb,"SYST") && strcmp(verb,"FEAT") && strcmp(verb,"OPTS") && strcmp(verb,"NOOP"))
+            Reply("530 Log in with USER and PASS first.");
         else if(!strcmp(verb,"SYST")) Reply("215 UNIX Type: L8");
         else if(!strcmp(verb,"FEAT")) Reply("211-Features:\r\n SIZE\r\n PASV\r\n EPSV\r\n211 End");
         else if(!strcmp(verb,"OPTS") || !strcmp(verb,"CLNT") || !strcmp(verb,"MODE") || !strcmp(verb,"STRU")) Reply("200 OK.");
@@ -483,7 +498,6 @@ void Session::Run() {
             else { Reply(renameFrom_[0] && MoveFile(renameFrom_,native) ? "250 Renamed." : "550 Cannot rename."); renameFrom_[0]=0; }
         }
         else if(!strcmp(verb,"ABOR")) Reply("226 No transfer to abort.");
-        else if(!strcmp(verb,"QUIT")) { Reply("221 Goodbye."); break; }
         else Reply("502 Command not implemented.");
     }
 }
@@ -503,8 +517,8 @@ DWORD WINAPI SessionThread(void* context) {
 }
 
 bool ServeFtp(SOCKET listener,const FtpRoot* roots,int rootCount,DWORD address,int socketBuffer,
-              int maxSessions,const FtpObserver& observer,char* error,size_t capacity) {
-    Shared shared={roots,rootCount,address,socketBuffer,&observer,0,0};
+              int maxSessions,const char* user,const char* password,const FtpObserver& observer,char* error,size_t capacity) {
+    Shared shared={roots,rootCount,address,socketBuffer,user,password ? password : "",&observer,0,0};
     HANDLE threads[64]={0}; int started=0; bool ok=true;
     while(!(observer.cancelled && observer.cancelled(observer.context))) {
         if(maxSessions && shared.finished>=maxSessions) break;

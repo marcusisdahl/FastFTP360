@@ -39,9 +39,9 @@ def pattern(seed, count):
 
 
 @contextlib.contextmanager
-def server(folder, sessions=1):
+def server(folder, sessions=1, credentials=()):
     port = free_port()
-    process = subprocess.Popen([str(ROOT / "build/host/ftp-host.exe"), str(port), str(folder), str(sessions)],
+    process = subprocess.Popen([str(ROOT / "build/host/ftp-host.exe"), str(port), str(folder), str(sessions), *credentials],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                creationflags=subprocess.CREATE_NO_WINDOW)
     try:
@@ -146,5 +146,31 @@ with tempfile.TemporaryDirectory() as temp:
             thread.join(60)
         host.communicate(timeout=10)
         check("three simultaneous sessions transfer correctly", results == [True, True, True])
+
+    with server(served, sessions=3, credentials=("xboxftp", "xboxftp")) as (port, host):
+        ftp = ftplib.FTP()
+        ftp.connect("127.0.0.1", port, timeout=20)
+        try:
+            ftp.login("xboxftp", "wrong")
+            refused = False
+        except ftplib.error_perm as error:
+            refused = str(error).startswith("530")
+        check("a wrong password is refused", refused)
+        ftp.quit()
+        ftp = ftplib.FTP()
+        ftp.connect("127.0.0.1", port, timeout=20)
+        try:
+            ftp.sendcmd("PWD")
+            blocked = False
+        except ftplib.error_perm as error:
+            blocked = str(error).startswith("530")
+        check("commands before login are refused", blocked)
+        ftp.quit()
+        ftp = ftplib.FTP()
+        ftp.connect("127.0.0.1", port, timeout=20)
+        ftp.login("xboxftp", "xboxftp")
+        check("the configured user name and password log in", ftp.pwd() == "/" and sorted(ftp.nlst()) == ["HDD", "NULL"])
+        ftp.quit()
+        host.communicate(timeout=10)
 
 print("%d FTP checks passed. Console execution remains untested." % passed)

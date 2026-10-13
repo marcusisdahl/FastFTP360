@@ -6,6 +6,8 @@ struct UiState {
     char ip[48],message[100],disk[100],ftp[100];
     // Current setting values as shown; main.cpp owns the choices.
     char buffers[32],cpu[24],diskTarget[16],diskBlock[16],drawing[16];
+    // FTP login; an empty user means any user name and password.
+    char ftpUser[24],ftpPassword[24];
     int phase,direction,duration,armed,completed,streams,rateLimit,options,downloadLimit,diskPhase,ftpPhase;
     int tab,focus,busy;
     double elapsed,rate,upload,download,mebibytes,diskTotal;
