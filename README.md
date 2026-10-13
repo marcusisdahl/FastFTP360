@@ -4,7 +4,7 @@ A standalone **RAM-to-RAM network benchmark** for homebrew-capable Xbox 360 cons
 
 **Update both applications to v0.2.0.** Protocol v3 explicitly negotiates the send limit and rendering option; older versions are rejected. Stop and exit the Xbox app before replacing its application XEX. Neither application needs to be run automatically at boot; the Windows app needs no administrator privileges. See [crash investigation](docs/CRASH-INVESTIGATION.md).
 
-It measures one to four TCP streams in either direction without reading or writing benchmark data to the Xbox drive. It is useful for comparing CUsbEnet builds and separating network limits from FTP, dashboard, or disk overhead. It measures the application, TCP stack, driver and link together, not raw USB bandwidth. It is a custom protocol, not an iperf server.
+It measures one to four TCP streams in either direction without reading or writing benchmark data to the Xbox drive. A separate Xbox-only disk test (below) measures drive write and read speed without the network. It is useful for comparing CUsbEnet builds and separating network limits from FTP, dashboard, or disk overhead. It measures the application, TCP stack, driver and link together, not raw USB bandwidth. It is a custom protocol, not an iperf server.
 
 ## Run a first test
 
@@ -19,6 +19,18 @@ The PC label is only a note: it does not detect, install, or switch a driver. Th
 With drawing paused, the Xbox deliberately holds a screen saying to use the PC for live progress. Controller B is still polled. Normal rendering resumes when the test finishes or stops. A static Xbox picture in this mode is expected; the PC's live progress and the response to B distinguish it from a frozen console.
 
 NetBench360 uses the console's existing network route. To measure a USB Ethernet adapter, ensure the console is actually using that adapter rather than native Ethernet or Wi-Fi. It does not select the adapter for you. Stop FTP transfers and other traffic while measuring.
+
+## Disk test (Xbox only)
+
+Use it to see whether FTP is limited by the drive rather than the network. With the Xbox app stopped (not listening):
+
+1. Press **Y** to choose the drive: `APP DRIVE` (wherever NetBench360.xex was launched from), `HDD` (internal hard drive), `USB 0` or `USB 1`.
+2. Press **RB** to choose the block size: 64 KiB, 256 KiB or 1 MiB. Small blocks are closer to how many FTP servers write.
+3. Press **X**. The app writes a 256 MiB file `NETBENCH360-DISKTEST.TMP` and flushes it, reads it back without the file cache, compares every byte, then deletes the file. **B** stops it and also deletes the file.
+
+The result line shows write and read MiB/s. The drive needs 256 MiB free. Compare: if disk write is well above the network RAM rate, the drive is not the FTP limit; if FTP to that drive is close to its disk write rate, the drive is the limit. FTP to a USB drive also shares the Xbox's USB with a USB Ethernet adapter, so it can be slower than either test alone.
+
+`HDD` and `USB` are mounted through a temporary kernel symbolic link that is removed afterwards. If a drive is absent or not a FATX device, the screen shows `NOT FOUND OR NOT MOUNTABLE` with a status code. The test writes only its own temporary file.
 
 ## Compare driver builds
 
@@ -53,7 +65,7 @@ Tests stop on errors, 15 seconds without socket activity, or a 180-second sessio
 
 ## Scope and recovery
 
-This is an application, not a kernel plugin. It does not patch hooks, modify USB queues, enable AX88179 aggregation, write NAND, edit launch.ini, install itself, or write test data on Xbox. The project explicitly excludes deployment from builds. Nothing is automatically copied to a console.
+This is an application, not a kernel plugin. It does not patch hooks, modify USB queues, enable AX88179 aggregation, write NAND, edit launch.ini, install itself, or write network test data on Xbox. Only the disk test writes, and only its own temporary file, which it deletes. The project explicitly excludes deployment from builds. Nothing is automatically copied to a console.
 
 Keep your known-good CUsbEnet XEX and launch.ini backup. Homebrew code and the loaded kernel driver can still crash or hang; zero risk cannot be guaranteed. If the app hangs, stop the PC test and restart the console using your existing recovery procedure. Since this app is launched manually, it is not configured to restart at boot. Stop testing a driver if an integrity failure occurs.
 

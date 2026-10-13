@@ -1,5 +1,14 @@
 # Changes
 
+## 0.2.1
+
+- Xbox-only **disk test**, no network or PC needed. While stopped: **Y** picks the drive (the app's own drive, internal HDD, USB 0, USB 1), **RB** picks the block size (64 KiB, 256 KiB, 1 MiB), **X** runs it.
+- It writes a 256 MiB file with normal cached writes and a timed final flush (like an FTP server), reads it back without the file cache, compares every byte, and deletes it. Write and read MiB/s show on the Xbox screen.
+- HDD and USB drives are mounted for the test through a temporary kernel symbolic link (`NBDISK:`) and unlinked afterwards. The app drive uses `game:`.
+- Network protocol and the Windows app are unchanged from 0.2.0.
+
+Built and host-tested only. The disk test has not run on a console yet.
+
 ## 0.2.0
 
 - Optional full data check: the receiver compares every timed byte with the pattern (PC "Data check: All data").
