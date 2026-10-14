@@ -27,6 +27,7 @@ FastFTP 0.5.0 adds a **Read test** tab. It answers one question: is playing Xbox
 | Source | Reads through | Measures | Does **not** measure |
 |---|---|---|---|
 | **Internal HDD**, **USB 0**, **USB 1**, **App drive** | The Xbox file system, read-only, from `<drive>:\FastFTP-Bench\` (changeable with `read_folder=`) | The drive and file system as a local baseline | Game code, DVD emulation |
+| **Game disc** | Files on the disc in the DVD drive (`\Device\Cdrom0`), read-only. **X** walks the disc and lists its 64 largest files, biggest first | The DVD drive and disc file system, the baseline NetISO replaces | Where on the disc the game's other files sit (the drive is faster on the outer edge), and the game's own read pattern. Burned discs on a stock drive will not read. |
 | **NetISO protocol** | FastFTP's own TCP client talking the NetISO server protocol | The network path (adapter, CUsbEnet or stock Ethernet, switch, server, server disk) for the request sizes a game might use | The console's NetISO plugin, its DVD emulation, its caching and its request pattern. This is **not** a full gameplay-path benchmark. |
 | **ConnectX** | Ordinary file reads on a path served by the **already loaded** ConnectX module | ConnectX's SMB1 client and the server | Game behaviour; only works if FastFTP can see the ConnectX path at all (see [ConnectX](#connectx)) |
 
@@ -92,9 +93,9 @@ A NetISO connection cannot be resynchronized after a short or late reply, so the
 ## Using the Read test tab
 
 1. **LB/RB** to **Read test**. **D-pad Up/Down** picks a row, **Left/Right** changes it.
-2. **Source**: Internal HDD, USB 0, USB 1, App drive, NetISO protocol or ConnectX.
+2. **Source**: Internal HDD, USB 0, USB 1, App drive, Game disc, NetISO protocol or ConnectX.
 3. For NetISO, press **Y** and type the server's IP address (`192.168.1.20` or `192.168.1.20:4323`). It is saved in `FastFTP.ini`.
-4. Press **X** to list the files in the folder (or the server's ISOs, up to 64), then choose one in **File**.
+4. Press **X** to list the files in the folder (or the server's ISOs, or the 64 largest files on the disc), then choose one in **File**.
 5. Choose **Workload**, **Duration**, **Data check** and **Xbox file cache**, then press **A**.
 6. **B** stops a run. The screen holds still while data moves (the *Drawing during transfers* setting applies here too).
 
@@ -115,10 +116,10 @@ A file named `FFTPFIX-<8 hex digits>.<anything>` is a **fixture**: every 32-bit 
 Make one on a PC with the host tool that `.\build.ps1 -Tests` (or `-HostOnly -Tests`) builds as `build\host\read-host.exe`:
 
 ```powershell
-build\host\read-host.exe fixture D:\ISOs\FFTPFIX-0000002A.iso 4294967296 0x2A   # 4 GiB, seed 0x2A
+build\host\read-host.exe fixture D:\ISOs\FFTPFIX-0000002A.iso 4293918720 0x2A   # 4095 MiB, seed 0x2A
 ```
 
-Copy the same file to `Hdd1:\FastFTP-Bench\` with FastFTP's FTP server for the local baseline. Any other file, such as a game ISO, is only **byte-count checked**: the right number of bytes arrived, but nothing independent says they are the right bytes. FastFTP never calls a game ISO verified, and hashing what arrived would not establish correctness either.
+Copy the same file to `Hdd1:\FastFTP-Bench\` (and `Usb0:\FastFTP-Bench\`) with FastFTP's FTP server for the local baseline. Keep fixtures below 4 GiB: the Xbox HDD (FATX) and FAT32 USB drives cannot hold a file of 4 GiB or more. Any other file, such as a game ISO, is only **byte-count checked**: the right number of bytes arrived, but nothing independent says they are the right bytes. FastFTP never calls a game ISO verified, and hashing what arrived would not establish correctness either.
 
 ## The NetISO wire protocol
 
@@ -221,6 +222,7 @@ Record the source, server, adapter and driver for each row. Change one thing at 
 - **Stock Ethernet versus UE306 + CUsbEnet**: the built-in port is 100 Mbit/s (at most about 11 MiB/s); the UE306 on CUsbEnet measured about 27.7 MiB/s PC to Xbox in the network test. NetISO protocol sequential 1 MiB should sit near those limits; random 4 KiB shows per-request latency, where the adapter's USB round trips may matter more than bandwidth.
 - **Server SSD versus NAS (HDD)**: random 4 KiB and 16 KiB on a fixture larger than the server's RAM show the disk; repeats of a smaller file show the cache.
 - **First pass versus repeats**: run the same file and workload several times. Pass 1 versus later passes shows how much caches help. Neither is a controlled cold-cache result.
+- **Game disc versus network**: run the same six workloads on the largest file of an original disc, ideally of the same game as the ISO. The disc is what NetISO replaces, so this is the most direct comparison. A file's position on the disc changes its sequential speed, so note which file you used.
 - **Local baselines**: the same fixture on Internal HDD and USB with the Xbox cache bypassed. USB shares the controller with a USB adapter, so USB results with CUsbEnet in use are lower than either alone.
 - **Real games** (by hand, the only full gameplay-path test): pick one game you have both on the internal drive (extracted or GOD) and on the server through NetISO (and/or ConnectX). With a stopwatch or a phone video, time: boot to title screen, the same level load, the same cutscene start, and count visible stalls during the same 5 minutes of play. Repeat each three times, alternating local and network, and note first-boot versus repeat. Compare with the Read test's random 16/64 KiB latency, not just sequential MiB/s.
 

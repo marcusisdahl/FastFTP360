@@ -8,7 +8,7 @@ Read [Recovery](READ-BENCHMARKS.md#recovery) first. Write down for every session
 
 - [ ] Your working FastFTP folder and its `FastFTP.ini` are left as they are.
 - [ ] FastFTP 0.5.0 is in its own folder, e.g. `Hdd1:\Apps\FastFTP-0.5.0\`. Not in `launch.ini`.
-- [ ] A fixture is ready: `read-host.exe fixture FFTPFIX-0000002A.iso 4294967296 0x2A` on the PC; a copy in the server's ISO folder and one in `Hdd1:\FastFTP-Bench\` (upload with the working FastFTP).
+- [ ] A fixture is ready: `read-host.exe fixture FFTPFIX-0000002A.iso 4293918720 0x2A` on the PC (under 4 GiB, so it fits on FATX and FAT32); a copy in the server's ISO folder and one in `Hdd1:\FastFTP-Bench\` (upload with the working FastFTP).
 - [ ] Server: `python tests\netiso_server.py <ISO folder>` (complete replies). Optionally also `netiso-srv` for comparison.
 
 ## 1. Without NetISO or ConnectX loaded
@@ -21,6 +21,7 @@ Read [Recovery](READ-BENCHMARKS.md#recovery) first. Write down for every session
 - [ ] Read test, ConnectX source: says the module is not loaded; nothing else changes.
 - [ ] Read test, Internal HDD: X finds the fixture; Sequential 1 MiB and Random 4 KiB complete with *known data checked* and 0 errors. Note MiB/s and p99.
 - [ ] Same with USB 0 if you use a USB drive.
+- [ ] Read test, Game disc, with an original disc in the drive: X lists its largest files; Sequential 1 MiB and Random 4 KiB complete with 0 errors. Then with no disc: X says no readable disc and nothing else changes.
 - [ ] Read test, NetISO protocol (console plugin **not** loaded): Y sets the server, X lists ISOs, all six workloads complete on the fixture with *known data checked*.
 - [ ] Repeat one NetISO workload 3 times: passes 1, 2, 3; no errors.
 - [ ] Press B during Measuring for each source: stops within about a second, says *Read test stopped*, a new run works.

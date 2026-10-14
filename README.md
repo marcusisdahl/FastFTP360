@@ -143,7 +143,7 @@ USB storage and a USB Ethernet adapter share the Xbox's USB bandwidth. So FTP to
 
 ## Read test
 
-> **Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Version 0.5.0 has been built and host-tested, not run on a console. Keep your working FastFTP and test this one from its own folder.
+> **Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Version 0.5.0 has had its first NetISO protocol runs on a console, but the console checklist is not done. Keep your working FastFTP and test this one from its own folder.
 
 <p align="center"><img src="docs/images/screen-readnet.png" alt="Read test tab with a NetISO protocol result" width="640"></p>
 
@@ -152,6 +152,7 @@ The **Read test** tab reads an existing file and reports MiB/s, reads per second
 | Source | What it reads |
 |---|---|
 | Internal HDD, USB 0, USB 1, App drive | A file in `FastFTP-Bench` on that drive |
+| Game disc | One of the largest files on the disc in the DVD drive, to compare with NetISO |
 | NetISO protocol | An ISO straight from a NetISO server on port 4323. FastFTP talks to the server itself, **bypassing the console's NetISO plugin**, so this is not a full gameplay-path test. |
 | ConnectX | A file through the ConnectX module, only if it is **already loaded** and you set its folder in `FastFTP.ini` |
 

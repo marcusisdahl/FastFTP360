@@ -53,11 +53,11 @@ enum { DiskTestBytes=256*1048576 };
 // Read test sources. Local drives are linked as \??\NBREAD: while their files
 // are listed or read, then unlinked. The read test opens files read-only and
 // never writes to the drive, the server or the file.
-enum { ReadLocal, ReadNetIso, ReadConnectX };
+enum { ReadLocal, ReadDisc, ReadNetIso, ReadConnectX };
 struct ReadSourceInfo { const char* name; const char* device; const char* drive; int kind; };
 static const ReadSourceInfo ReadSources[]={{"Internal HDD","\\Device\\Harddisk0\\Partition1","Hdd1",ReadLocal},
     {"USB 0","\\Device\\Mass0","Usb0",ReadLocal},{"USB 1","\\Device\\Mass1","Usb1",ReadLocal},{"App drive",NULL,"Game",ReadLocal},
-    {"NetISO protocol",NULL,NULL,ReadNetIso},{"ConnectX",NULL,NULL,ReadConnectX}};
+    {"Game disc","\\Device\\Cdrom0","Dvd",ReadDisc},{"NetISO protocol",NULL,NULL,ReadNetIso},{"ConnectX",NULL,NULL,ReadConnectX}};
 enum { ReadSourceCount=sizeof(ReadSources)/sizeof(ReadSources[0]) };
 static int ReadSourceChoice=0,ReadFileChoice=0,ReadWorkloadChoice=nb::ReadSeq1M,ReadDurationChoice=1;
 static bool ReadCheckOn=true,ReadCacheBypass=true;
@@ -196,13 +196,17 @@ static void DescribeSettings() {
     _snprintf_s(State.readDuration,sizeof(State.readDuration),_TRUNCATE,"%u s",ReadDurations[ReadDurationChoice]);
     strcpy_s(State.readCheck,ReadCheckOn ? "On" : "Off");
     strcpy_s(State.readCache,source.kind==ReadNetIso ? "Not used" : ReadCacheBypass ? "Bypassed" : "Normal");
-    strcpy_s(State.readFind,source.kind==ReadLocal ? "Find files" : source.kind==ReadNetIso ? "List ISOs" : "Check ConnectX");
+    strcpy_s(State.readFind,source.kind==ReadLocal || source.kind==ReadDisc ? "Find files" : source.kind==ReadNetIso ? "List ISOs" : "Check ConnectX");
     State.readFiles=ReadFileCount; State.readServerKey=source.kind==ReadNetIso;
     char (*lines)[64]=State.readLines;
     if(source.kind==ReadLocal) {
         _snprintf_s(lines[0],64,_TRUNCATE,"Reads an existing file in %s:\\%s.",source.drive,ReadIni.folder);
         strcpy_s(lines[1],64,"Read only, separate from the disk write test.");
         _snprintf_s(lines[2],64,_TRUNCATE,"%s",ReadListNote[0] ? ReadListNote : "X lists the files in that folder.");
+    } else if(source.kind==ReadDisc) {
+        strcpy_s(lines[0],64,"Reads a file on the disc in the DVD drive.");
+        strcpy_s(lines[1],64,"Read only. X lists the largest files first.");
+        _snprintf_s(lines[2],64,_TRUNCATE,"%s",ReadListNote[0] ? ReadListNote : "Insert an original game disc, then press X.");
     } else if(source.kind==ReadNetIso) {
         strcpy_s(lines[0],64,"Reads the ISO straight from the server and");
         strcpy_s(lines[1],64,"bypasses the console's NetISO plugin.");
@@ -565,10 +569,45 @@ static bool ReadFolder(const ReadSourceInfo& source,char* folder,size_t capacity
         if(status<0) { _snprintf_s(error,errorCapacity,_TRUNCATE,"%s not found or not mountable (0x%08X).",source.name,DWORD(status)); return false; }
         linked=true; root="NBREAD:";
     }
-    _snprintf_s(folder,capacity,_TRUNCATE,"%s\\%s",root,ReadIni.folder);
+    // A game disc is read where its files are; there is no bench folder on it.
+    if(source.kind==ReadDisc) _snprintf_s(folder,capacity,_TRUNCATE,"%s",root);
+    else _snprintf_s(folder,capacity,_TRUNCATE,"%s\\%s",root,ReadIni.folder);
     return true;
 }
 static int CompareNames(const void* a,const void* b) { return _stricmp(static_cast<const char*>(a),static_cast<const char*>(b)); }
+// Walks a game disc and keeps the largest files, biggest first, as paths
+// relative to the disc root. Large files are where game data sits.
+static char ScanNames[nb::ReadMaxFiles][nb::ReadNameMax];
+static char ScanFolders[64][nb::ReadNameMax];
+static bool ScanDisc(const char* root,int& count,char* error,size_t errorCapacity) {
+    nb::U64 sizes[nb::ReadMaxFiles]; int folders=1,visited=0; count=0; ScanFolders[0][0]=0;
+    while(folders && visited<512 && !IsCancelled(NULL)) {
+        char folder[nb::ReadNameMax]; strcpy_s(folder,ScanFolders[--folders]); ++visited;
+        char pattern[nb::ReadNameMax+16]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\%s%s*",root,folder,folder[0] ? "\\" : "");
+        WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(pattern,&entry);
+        if(find==INVALID_HANDLE_VALUE) {
+            if(folder[0]) continue; // An unreadable subfolder is skipped.
+            _snprintf_s(error,errorCapacity,_TRUNCATE,"No readable disc in the drive (error %u). Insert an original game disc.",GetLastError());
+            return false;
+        }
+        do {
+            char path[nb::ReadNameMax];
+            if(_snprintf_s(path,sizeof(path),_TRUNCATE,"%s%s%s",folder,folder[0] ? "\\" : "",entry.cFileName)<0) continue;
+            if(entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) {
+                if(entry.cFileName[0]!='.' && folders<64) strcpy_s(ScanFolders[folders++],path);
+                continue;
+            }
+            const nb::U64 size=(nb::U64(entry.nFileSizeHigh)<<32)|entry.nFileSizeLow;
+            int at=count;
+            if(count==nb::ReadMaxFiles) { if(size<=sizes[count-1]) continue; at=count-1; } else ++count;
+            for(;at>0 && sizes[at-1]<size;--at) { sizes[at]=sizes[at-1]; strcpy_s(ScanNames[at],ScanNames[at-1]); }
+            sizes[at]=size; strcpy_s(ScanNames[at],path);
+        } while(FindNextFile(find,&entry));
+        FindClose(find);
+    }
+    if(!count) strcpy_s(error,errorCapacity,"The disc has no files FastFTP can read.");
+    return count>0;
+}
 static void ReadDone(const char* error,const char* note) {
     EnterCriticalSection(&StateLock);
     State.readPhase=0; State.armed=0;
@@ -578,8 +617,8 @@ static void ReadDone(const char* error,const char* note) {
     else { State.phase=nb::Idle; State.message[0]=0; }
     LeaveCriticalSection(&StateLock);
 }
-// X: lists the files in the source's folder, or the ISOs on the NetISO server.
-static char ScanNames[nb::ReadMaxFiles][nb::ReadNameMax];
+// X: lists the files in the source's folder, the largest files on a game disc,
+// or the ISOs on the NetISO server.
 static DWORD WINAPI ReadScanThread(void*) {
     const ReadSourceInfo& source=ReadSources[ReadSourceChoice];
     char error[160]={0},note[64]={0}; int count=0;
@@ -594,7 +633,10 @@ static DWORD WINAPI ReadScanThread(void*) {
         else _snprintf_s(note,sizeof(note),_TRUNCATE,"%d ISO%s listed%s.",count,count==1 ? "" : "s",count==nb::ReadMaxFiles ? " (the first 64)" : "");
     } else {
         char folder[nb::ReadFolderMax+16]; bool linked=false;
-        if(ReadFolder(source,folder,sizeof(folder),linked,error,sizeof(error))) {
+        if(source.kind==ReadDisc) {
+            if(ReadFolder(source,folder,sizeof(folder),linked,error,sizeof(error)) && ScanDisc(folder,count,error,sizeof(error)))
+                _snprintf_s(note,sizeof(note),_TRUNCATE,"%d largest file%s listed.",count,count==1 ? "" : "s");
+        } else if(ReadFolder(source,folder,sizeof(folder),linked,error,sizeof(error))) {
             char pattern[nb::ReadFolderMax+20]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\*",folder);
             WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(pattern,&entry);
             if(find==INVALID_HANDLE_VALUE) {
@@ -669,6 +711,7 @@ static DWORD WINAPI ReadRunThread(void*) {
         if(ReadFolder(source,folder,sizeof(folder),linked,result.error,sizeof(result.error))) {
             char path[sizeof(shown)]; _snprintf_s(path,sizeof(path),_TRUNCATE,"%s\\%s",folder,file);
             if(source.kind==ReadLocal) _snprintf_s(shown,sizeof(shown),_TRUNCATE,"%s:\\%s\\%s",source.drive,ReadIni.folder,file);
+            else if(source.kind==ReadDisc) _snprintf_s(shown,sizeof(shown),_TRUNCATE,"%s:\\%s",source.drive,file);
             else strcpy_s(shown,path);
             if(local.Open(path,ReadCacheBypass,nb::WorkloadRandom(ReadWorkloadChoice))) backend=&local;
             else _snprintf_s(result.error,sizeof(result.error),_TRUNCATE,"%s: %s",file,local.Error());
@@ -715,7 +758,7 @@ static DWORD WINAPI ReadRunThread(void*) {
     if(result.status==nb::ReadCompleted) {
         State.phase=nb::Idle;
         _snprintf_s(State.read,sizeof(State.read),_TRUNCATE,"%s, %s: %.2f MiB/s, p99 %.1f ms, pass %d",
-            source.kind==ReadLocal ? source.drive : source.name,nb::WorkloadName(ReadWorkloadChoice),result.Rate(),result.latencyP99,pass);
+            source.kind==ReadLocal || source.kind==ReadDisc ? source.drive : source.name,nb::WorkloadName(ReadWorkloadChoice),result.Rate(),result.latencyP99,pass);
         _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,
             "Completed. %.2f MiB/s, %.1f reads/s. Latency ms: mean %.1f, p50 %.1f, p95 %.1f, p99 %.1f, max %.1f. %s, %s, %u error%s.",
             result.Rate(),result.Operations(),result.latencyMean,result.latencyP50,result.latencyP95,result.latencyP99,result.latencyMax,
