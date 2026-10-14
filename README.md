@@ -160,6 +160,8 @@ Pick the source, press **X** to list files (or **Y** first to set the NetISO ser
 
 FastFTP never loads, unloads or configures NetISO or ConnectX. Reading through a mounted NetISO disc is not implemented, because the plugin's device name could not be verified. The reference server `netiso-srv` can cut 256 KiB and 1 MiB replies short; `tests/netiso_server.py` is a fixed test server.
 
+First results, comparing NetISO over the built-in port and the UE306 with disc, internal HDD and USB: [docs/READ-RESULTS.md](docs/READ-RESULTS.md). Over the UE306, sequential reads reached 27.1 MiB/s, and a random 64 KiB read took 2.8 ms.
+
 Details, recovery, and what each number means: [docs/READ-BENCHMARKS.md](docs/READ-BENCHMARKS.md). Before trusting it on your console: [docs/CONSOLE-TEST-CHECKLIST.md](docs/CONSOLE-TEST-CHECKLIST.md).
 
 ## Settings

@@ -1,0 +1,13 @@
+date,port,source,file,workload,request_bytes,duration_s,check,pass,mib_s,reads_s,lat_mean_ms,lat_p50_ms,lat_p95_ms,lat_p99_ms,lat_max_ms,errors
+2026-10-14,UE306 + CUsbEnet,NetISO protocol,Guitar Hero III ISO,Sequential 1 MiB,1048576,30,byte counts,1,27.10,27.1,36.9,36.9,37.9,37.9,78.1,0
+2026-10-14,UE306 + CUsbEnet,NetISO protocol,Guitar Hero III ISO,Sequential 256 KiB,262144,30,byte counts,5,26.15,104.6,9.6,9.7,9.7,10.0,11.5,0
+2026-10-14,UE306 + CUsbEnet,NetISO protocol,Guitar Hero III ISO,Sequential 64 KiB,65536,30,byte counts,4,23.40,374.5,2.7,2.6,2.8,2.9,3.1,0
+2026-10-14,UE306 + CUsbEnet,NetISO protocol,Guitar Hero III ISO,Random 64 KiB,65536,30,byte counts,3,22.21,355.3,2.8,2.9,3.0,3.1,21.1,0
+2026-10-14,UE306 + CUsbEnet,NetISO protocol,Guitar Hero III ISO,Random 16 KiB,16384,30,byte counts,2,13.28,849.9,1.2,1.2,1.4,1.4,2.5,0
+2026-10-14,UE306 + CUsbEnet,NetISO protocol,Guitar Hero III ISO,Random 4 KiB,4096,30,byte counts,1,5.80,1484.8,0.7,0.6,0.8,0.9,3.2,0
+2026-10-14,Built-in 100 Mbit,NetISO protocol,Guitar Hero III ISO,Sequential 1 MiB,1048576,30,byte counts,1,11.23,11.2,89.1,89.5,89.5,89.5,89.5,0
+2026-10-14,Built-in 100 Mbit,NetISO protocol,Guitar Hero III ISO,Sequential 256 KiB,262144,30,byte counts,8,11.13,44.5,22.5,22.5,23.0,23.0,41.6,0
+2026-10-14,Built-in 100 Mbit,NetISO protocol,Guitar Hero III ISO,Sequential 64 KiB,65536,30,byte counts,7,10.74,171.8,5.8,5.9,6.0,6.1,6.5,0
+2026-10-14,Built-in 100 Mbit,NetISO protocol,Guitar Hero III ISO,Random 64 KiB,65536,30,byte counts,6,10.41,166.5,6.0,6.0,6.3,6.4,6.9,0
+2026-10-14,Built-in 100 Mbit,NetISO protocol,Guitar Hero III ISO,Random 16 KiB,16384,30,byte counts,5,8.91,570.2,1.8,1.8,1.9,1.9,3.4,0
+2026-10-14,Built-in 100 Mbit,NetISO protocol,Guitar Hero III ISO,Random 4 KiB,4096,30,byte counts,4,6.77,1732.5,0.6,0.6,0.7,0.8,10.5,0

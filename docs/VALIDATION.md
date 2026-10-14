@@ -1,12 +1,15 @@
 # v0.5.0 validation (read test)
 
-**Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Nothing in this section ran on a console.
+**Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Only the console runs listed below have happened. The console checklist has not been completed.
+
+- **Console, 2026-10-14** (Marcus's console, Aurora): FastFTP 0.5.0 launched. The Read test's NetISO protocol source opened outbound TCP from the Xbox to `tests/netiso_server.py` and completed six workloads on the built-in 100 Mbit port and six on the UE306 + CUsbEnet, 30 s each, all with 0 errors. The file was a game ISO, so only byte counts were checked. Results: [READ-RESULTS.md](READ-RESULTS.md).
+- **Game disc source** (added at c0cfb93): built with 0 errors, and the Windows host tests pass (53/29/53). It has not run on a console, because the test console's DVD drive is broken.
 
 - **Xbox build** (Windows, VS2022 + Xbox 360 SDK, PowerPC compiler 16.00.11886, `DEVKIT_ONLY=0`, clean rebuild at 7256936): 0 errors. New warnings are only C4127 from the SDK's `FD_SET` macro in `readbench.cpp`, the same pattern as the existing `bench.cpp` and `ftp.cpp` warnings. The XEX links and ImageXex runs. The Xbox SDK has no `SO_ERROR`, so a refused NetISO connect is detected through `select`'s except set there.
 - **Windows host tests** (`.\build.ps1 -Tests`): `tests/protocol.py` 53 passed, `tests/ftp.py` 29 passed, `tests/read.py` 53 passed (the three reference-server checks need `NETISO_SRV`).
 - **Linux host tests** (engine built with `tests/posix_compat.h`): `tests/read.py` 56 passed, including three reads of a fixture through tuxuser/netiso-srv `40e0a77` built from source. The same netiso-srv build reproduced its reply truncation (see [READ-BENCHMARKS.md](READ-BENCHMARKS.md#defects-in-the-reference-server)).
 - **Screen**: the Read test tab rendered with `tests/ui_preview.cpp` (scenes `read`, `readnet`, `readrun`, `readcx`) without a console.
-- **Not verified**: anything on the console. That includes the launch under ABadAvatar/BadUpdate, outbound TCP from the Xbox, `GetModuleHandle` for plugins loaded by DashLaunch, ConnectX paths from a title, `FILE_FLAG_NO_BUFFERING` on USB and ConnectX, cancellation during real network stalls, and stability with CUsbEnet. See [CONSOLE-TEST-CHECKLIST.md](CONSOLE-TEST-CHECKLIST.md).
+- **Not verified on the console yet**: launch under ABadAvatar/BadUpdate specifically, `GetModuleHandle` for plugins loaded by DashLaunch, ConnectX paths from a title, `FILE_FLAG_NO_BUFFERING` on USB, disc and ConnectX, known-data fixture checks, cancellation during real network stalls, and longer-term stability with CUsbEnet. See [CONSOLE-TEST-CHECKLIST.md](CONSOLE-TEST-CHECKLIST.md).
 
 # v0.2.0 validation
 

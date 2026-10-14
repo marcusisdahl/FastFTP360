@@ -217,6 +217,8 @@ What to do if FastFTP 0.5.0 misbehaves:
 
 ## Comparisons worth making
 
+Results measured so far, with published disc figures: [READ-RESULTS.md](READ-RESULTS.md).
+
 Record the source, server, adapter and driver for each row. Change one thing at a time.
 
 - **Stock Ethernet versus UE306 + CUsbEnet**: the built-in port is 100 Mbit/s (at most about 11 MiB/s); the UE306 on CUsbEnet measured about 27.7 MiB/s PC to Xbox in the network test. NetISO protocol sequential 1 MiB should sit near those limits; random 4 KiB shows per-request latency, where the adapter's USB round trips may matter more than bandwidth.
