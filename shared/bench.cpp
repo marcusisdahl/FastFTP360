@@ -58,6 +58,20 @@ bool PrepareListener(SOCKET s, char* error, size_t capacity) {
     }
     return PrepareSocket(s,error,capacity);
 }
+bool PrepareOutbound(SOCKET s, char* error, size_t capacity) {
+#if defined(_XBOX) || defined(NB_TEST_LAN_OPTIONS)
+    BOOL enabled=TRUE;
+    if (setsockopt(s,SOL_SOCKET,0x5801,reinterpret_cast<const char*>(&enabled),sizeof(enabled))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"CLIENT LAN 5801 FAILED (%d)",code); return false;
+    }
+    if (setsockopt(s,SOL_SOCKET,0x5802,reinterpret_cast<const char*>(&enabled),sizeof(enabled))) {
+        int code=WSAGetLastError();
+        _snprintf_s(error,capacity,_TRUNCATE,"CLIENT LAN 5802 FAILED (%d)",code); return false;
+    }
+#endif
+    return PrepareSocket(s,error,capacity);
+}
 bool SetSocketBuffers(SOCKET s, int bytes, char* error, size_t capacity) {
     // Set on the listener before bind/listen; accepted sockets inherit it.
     if (setsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&bytes),sizeof(bytes))) {

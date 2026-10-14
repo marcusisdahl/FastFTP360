@@ -2,7 +2,7 @@
 #pragma once
 #ifdef _XBOX
 #include <xtl.h>
-#else
+#elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <windows.h>
@@ -37,6 +37,9 @@ void Pattern(unsigned char* p, DWORD seed);
 double Now();
 bool PrepareSocket(SOCKET s, char* error, size_t capacity);
 bool PrepareListener(SOCKET s, char* error, size_t capacity);
+// For a connection the Xbox opens itself: the same LAN options as a listener
+// (set before connect), then nonblocking.
+bool PrepareOutbound(SOCKET s, char* error, size_t capacity);
 bool SetSocketBuffers(SOCKET s, int bytes, char* error, size_t capacity);
 bool Serve(SOCKET s, const Observer& observer, Result& result, char* error, size_t capacity);
 const char* PhaseName(Phase phase);
