@@ -78,13 +78,17 @@ int main(int argc,char** argv) {
     if(!strcmp(mode,"percentiles")) {
         nb::LatencyHistogram h;
         for(int i=2;i<argc;++i) h.Add(strtoull(argv[i],NULL,10));
+        // With no arguments the values come from stdin; Windows limits a command line to 32767 characters.
+        unsigned long long value;
+        if(argc==2) while(scanf("%llu",&value)==1) h.Add(value);
         printf("PERCENTILES count=" NB_U64 " mean=%.3f p50=" NB_U64 " p95=" NB_U64 " p99=" NB_U64 " max=" NB_U64 "\n",
             h.Count(),h.Mean(),h.Percentile(0.5),h.Percentile(0.95),h.Percentile(0.99),h.Maximum());
         return 0;
     }
     if(!strcmp(mode,"file") && argc>=7) {
         nb::ReadConfig c=Config(argv[3],argv[4],argv[5],argv[6]);
-        const char* name=strrchr(argv[2],'/'); name=name ? name+1 : argv[2];
+        const char* name=argv[2];
+        for(const char* p=argv[2];*p;++p) if(*p=='/' || *p=='\\') name=p+1;
         c.fixture=nb::FixtureSeed(name,c.fixtureSeed);
         if(argc>7) CancelAt=nb::Now()+atof(argv[7]);
         nb::FileReadBackend file; nb::ReadResult r;

@@ -33,8 +33,9 @@ def check(name, condition, detail=""):
     print("PASS " + name, flush=True)
 
 
-def run(*args, timeout=60):
-    output = subprocess.run([str(EXE), *map(str, args)], capture_output=True, text=True, timeout=timeout, **FLAGS).stdout
+def run(*args, timeout=60, stdin=None):
+    output = subprocess.run([str(EXE), *map(str, args)], input=stdin, capture_output=True, text=True, timeout=timeout,
+                            **FLAGS).stdout
     return output
 
 
@@ -184,7 +185,7 @@ with tempfile.TemporaryDirectory() as temp:
     out = run("percentiles", *range(1, 101))
     check("percentiles are exact below 64 us", "p50=50 p95=95 p99=99 max=100" in out, out)
     values = [rng.randrange(1000, 2000000) for _ in range(5000)]
-    out = run("percentiles", *values).split()
+    out = run("percentiles", stdin=" ".join(map(str, values))).split()
     stats = dict(item.split("=") for item in out[1:])
     exact = sorted(values)
     for name, fraction in (("p50", 0.5), ("p95", 0.95), ("p99", 0.99)):

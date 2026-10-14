@@ -299,8 +299,13 @@ bool NetIsoClient::Connect(DWORD address,int port,double connectSeconds) {
             int rc=select(0,NULL,&writable,&failed,&interval);
             if(rc==SOCKET_ERROR) { code=WSAGetLastError(); Close(); return Fail(ReadErrorFailed,"Connect wait failed (%d)",code); }
             if(rc==0) continue;
-            int status=0,length=sizeof(status);
-            if(FD_ISSET(socket_,&failed) || (getsockopt(socket_,SOL_SOCKET,SO_ERROR,reinterpret_cast<char*>(&status),&length)==0 && status)) {
+            int status=0;
+#ifdef SO_ERROR
+            int length=sizeof(status);
+            if(getsockopt(socket_,SOL_SOCKET,SO_ERROR,reinterpret_cast<char*>(&status),&length)) status=0;
+#endif
+            // The Xbox SDK has no SO_ERROR; Winsock reports a refused connect through the except set there.
+            if(FD_ISSET(socket_,&failed) || status) {
                 Close(); return Fail(ReadErrorFailed,"The server refused the connection (%d). Is it running on port %d?",status,port);
             }
             break;
