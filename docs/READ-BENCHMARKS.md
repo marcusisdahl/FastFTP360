@@ -112,7 +112,7 @@ read_seed=1
 
 A file named `FFTPFIX-<8 hex digits>.<anything>` is a **fixture**: every 32-bit big-endian word at byte offset 4·w equals `FixtureWord(seed, w)` (see `shared/readbench.cpp`; an independent Python copy is in `tests/read.py`). With **Data check** on, every byte of every read is compared with that formula, so corruption anywhere on the path (server, network, adapter, driver, file system) is detected. The check's time is excluded from throughput and reported separately.
 
-Make one on a PC with the host tool from `.\build.ps1 -HostOnly -Tests`:
+Make one on a PC with the host tool that `.\build.ps1 -Tests` (or `-HostOnly -Tests`) builds as `build\host\read-host.exe`:
 
 ```powershell
 build\host\read-host.exe fixture D:\ISOs\FFTPFIX-0000002A.iso 4294967296 0x2A   # 4 GiB, seed 0x2A

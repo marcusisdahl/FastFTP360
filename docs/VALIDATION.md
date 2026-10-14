@@ -1,3 +1,13 @@
+# v0.5.0 validation (read test)
+
+**Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Nothing in this section ran on a console.
+
+- **Xbox build** (Windows, VS2022 + Xbox 360 SDK, PowerPC compiler 16.00.11886, `DEVKIT_ONLY=0`, clean rebuild at 7256936): 0 errors. New warnings are only C4127 from the SDK's `FD_SET` macro in `readbench.cpp`, the same pattern as the existing `bench.cpp` and `ftp.cpp` warnings. The XEX links and ImageXex runs. The Xbox SDK has no `SO_ERROR`, so a refused NetISO connect is detected through `select`'s except set there.
+- **Windows host tests** (`.\build.ps1 -Tests`): `tests/protocol.py` 53 passed, `tests/ftp.py` 29 passed, `tests/read.py` 53 passed (the three reference-server checks need `NETISO_SRV`).
+- **Linux host tests** (engine built with `tests/posix_compat.h`): `tests/read.py` 56 passed, including three reads of a fixture through tuxuser/netiso-srv `40e0a77` built from source. The same netiso-srv build reproduced its reply truncation (see [READ-BENCHMARKS.md](READ-BENCHMARKS.md#defects-in-the-reference-server)).
+- **Screen**: the Read test tab rendered with `tests/ui_preview.cpp` (scenes `read`, `readnet`, `readrun`, `readcx`) without a console.
+- **Not verified**: anything on the console. That includes the launch under ABadAvatar/BadUpdate, outbound TCP from the Xbox, `GetModuleHandle` for plugins loaded by DashLaunch, ConnectX paths from a title, `FILE_FLAG_NO_BUFFERING` on USB and ConnectX, cancellation during real network stalls, and stability with CUsbEnet. See [CONSOLE-TEST-CHECKLIST.md](CONSOLE-TEST-CHECKLIST.md).
+
 # v0.2.0 validation
 
 `tests/protocol.py` now has 53 checks. On top of the v0.1.3 checks, new ones cover the full data check in both directions (every timed byte counted), a single flipped timed byte being rejected, two parallel streams on one listener, the automatic PC buffer setting in both directions, rejection of unknown direction-field flags, and prompt rejection of protocol v2 (app 0.1.3) peers.
