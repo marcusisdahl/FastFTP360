@@ -8,19 +8,21 @@
 #include <string.h>
 namespace nb {
 UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),
-    tab(0),focus(0),busy(0),keyboard(0),recentCount(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
+    tab(0),focus(0),busy(0),keyboard(0),readPhase(0),readFiles(0),readServerKey(0),recentCount(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
     buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
+    readSource[0]=0; readFile[0]=0; readWorkload[0]=0; readDuration[0]=0; readCheck[0]=0; readCache[0]=0;
+    readLines[0][0]=readLines[1][0]=readLines[2][0]=0; read[0]=0; readFind[0]=0;
 }
 // The Network tab has none: its tuning lives on the Settings tab.
-int SettingCount(int tab) { static const int rows[]={1,0,2,3}; return tab>=0 && tab<TabCount ? rows[tab] : 0; }
+int SettingCount(int tab) { static const int rows[]={1,0,2,6,3}; return tab>=0 && tab<TabCount ? rows[tab] : 0; }
 
 static ImFont* Small; static ImFont* Body; static ImFont* Heading; static ImFont* Hero;
 enum { Left=64, Right=1216, Top=36, Bottom=684 };
 
 static ImU32 Hex(unsigned int rgb,int alpha=255) { return IM_COL32((rgb>>16)&255,(rgb>>8)&255,rgb&255,alpha); }
 static const unsigned int Background=0x0F1725,Card=0x192537,Raised=0x223349,White=0xE2EBF4,Muted=0x8FA6BA,Dim=0x51667A,
-    Green=0x3ED9BC,Blue=0x73B8FF,Error=0xFFAC8B,ButtonA=0x5DC21E,ButtonB=0xE5413A,ButtonY=0xF2C232;
+    Green=0x3ED9BC,Blue=0x73B8FF,Error=0xFFAC8B,ButtonA=0x5DC21E,ButtonB=0xE5413A,ButtonX=0x2E7FE0,ButtonY=0xF2C232;
 
 void InitUi() {
     ImGui::CreateContext();
@@ -87,6 +89,17 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
         lines[0]="Writes a 256 MiB file, reads it back without the cache";
         lines[1]="and checks every byte. Needs 256 MiB free on the drive.";
         lines[2]="The test file is deleted afterwards.";
+    } else if(s.tab==TabRead) {
+        static const char* phases[]={"Read test","Setting up","Warming up","Measuring"};
+        title=phases[s.readPhase>=0 && s.readPhase<4 ? s.readPhase : 0];
+        if(!s.readPhase && s.phase==7) title="Error";
+        if(s.readPhase>=2) {
+            // Warm-up is fixed at 3 seconds; the measurement uses the duration setting.
+            const double length=s.readPhase==2 ? 3.0 : s.duration;
+            fraction=length>0 ? s.elapsed/length : 0;
+            _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  %.1f of %.0f s  /  %.1f MiB",s.readPhase==2 ? "Warm-up, not measured" : "Measuring",s.elapsed,length,s.mebibytes);
+        } else if(s.readPhase==1) strcpy_s(text,"Opening the file or connecting to the server.");
+        for(int i=0;i<3;++i) lines[i]=s.readLines[i][0] ? s.readLines[i] : NULL;
     } else if(s.tab==TabSettings) {
         title="Settings";
         static const char* help[3][3]={
@@ -128,13 +141,15 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
     }
     bool error=s.phase==7 && !s.busy;
     Text(Heading,x,y,Hex(error ? Error : Green),title);
-    bool live=(s.tab==TabNetwork && (s.phase==5 || s.phase==6)) || (s.tab==TabDisk && s.diskPhase) || (s.tab==TabFtp && s.ftpPhase>1);
+    bool live=(s.tab==TabNetwork && (s.phase==5 || s.phase==6)) || (s.tab==TabDisk && s.diskPhase) || (s.tab==TabFtp && s.ftpPhase>1) ||
+        (s.tab==TabRead && s.readPhase>=2);
     if(live) {
         Rate(x-4,y+50,s.rate);
         // Below the big rate, also on the shorter FTP card.
         float detail=y+h-112; if(detail<y+150) detail=y+150;
         Text(Body,x,detail,Hex(Muted),(s.options&1) ? "Drawing paused during the transfer. B still stops." : text);
     }
+    else if(s.tab==TabRead && s.readPhase==1) Text(Body,x,y+60,Hex(White),text);
     else if(s.message[0] && s.ftpPhase!=1) List->AddText(Body,Body->FontSize,ImVec2(x,y+60),Hex(error ? Error : White),s.message,NULL,w);
     else {
         for(int i=0;i<3 && lines[i];++i) Text(Body,x,y+60+i*38,Hex(White),lines[i]);
@@ -147,21 +162,29 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
 // Right card: settings for the selected tab. Locked while something runs.
 static void Settings(const UiState& s,float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
-    const char* heading=s.tab==TabFtp ? "LOGIN" : s.tab==TabSettings ? "ADVANCED" : "SETTINGS";
+    const char* heading=s.tab==TabFtp ? "LOGIN" : s.tab==TabSettings ? "ADVANCED" : s.tab==TabRead ? "READ TEST" : "SETTINGS";
     char caption[48]; _snprintf_s(caption,sizeof(caption),_TRUNCATE,s.busy ? "%s  (STOP TO CHANGE)" : "%s",heading);
     Text(Small,x+28,y+24,Hex(Muted),caption);
-    const char* labels[3]; const char* values[3]; int rows=SettingCount(s.tab);
-    if(s.tab==TabDisk) { labels[0]="Drive"; values[0]=s.diskTarget; labels[1]="Block size"; values[1]=s.diskBlock; }
+    const char* labels[6]; const char* values[6]; int rows=SettingCount(s.tab);
+    if(s.tab==TabRead) {
+        labels[0]="Source"; values[0]=s.readSource; labels[1]="File"; values[1]=s.readFile; labels[2]="Workload"; values[2]=s.readWorkload;
+        labels[3]="Duration"; values[3]=s.readDuration; labels[4]="Data check"; values[4]=s.readCheck; labels[5]="Xbox file cache"; values[5]=s.readCache;
+    }
+    else if(s.tab==TabDisk) { labels[0]="Drive"; values[0]=s.diskTarget; labels[1]="Block size"; values[1]=s.diskBlock; }
     else if(s.tab==TabFtp) { labels[0]="Login"; values[0]=s.ftpUser[0] ? "On" : "Off, any user name and password"; }
     else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing; }
-    // Rows close up a little on the shorter FTP card.
-    const float pitch=h<280 ? 60.0f : 70.0f;
+    // Rows close up a little on the shorter FTP card and the six-row read card.
+    float pitch=h<280 ? 60.0f : 70.0f;
+    if(rows>3) pitch=(h-62)/rows;
     for(int i=0;i<rows;++i) {
         float top=y+56+i*pitch; bool focused=!s.busy && i==s.focus;
         if(focused) { Box(x+16,top,w-32,pitch-6,Hex(Raised),10); Box(x+16,top+(pitch-6-44)/2,5,44,Hex(Green),2); }
-        const float tight=pitch<70 ? 3.0f : 0.0f;
+        const float tight=pitch<70 ? (pitch<60 ? 5.0f : 3.0f) : 0.0f;
         Text(Small,x+36,top+5-tight,Hex(s.busy ? Dim : Muted),labels[i]);
-        Text(Body,x+36,top+30-2*tight,Hex(s.busy ? Dim : White),values[i]);
+        // Long values such as file names are cut with "..." before the arrows.
+        char shown[72]; strcpy_s(shown,values[i]);
+        for(size_t length=strlen(shown);length>4 && Width(Body,shown)>w-140;) { --length; strcpy_s(shown+length-3,4,"..."); }
+        Text(Body,x+36,top+30-2*tight,Hex(s.busy ? Dim : White),shown);
         if(focused) {
             TextRight(Heading,x+w-36,top+pitch/2-20,Hex(Green),">");
             TextRight(Heading,x+w-36-Width(Heading,">")-14,top+pitch/2-20,Hex(Green),"<");
@@ -189,9 +212,11 @@ static void Files(float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+18,Hex(Muted),"FILES NEXT TO THE XEX");
     Text(Body,x+28,y+52,Hex(White),"FastFTP.ini");
-    Text(Body,x+200,y+52,Hex(Muted),"FTP login");
-    Text(Body,x+460,y+52,Hex(White),"FastFTP.log");
-    Text(Body,x+640,y+52,Hex(Muted),"FTP activity");
+    Text(Small,x+182,y+55,Hex(Muted),"Login, read test");
+    Text(Body,x+400,y+52,Hex(White),"FastFTP.log");
+    Text(Small,x+558,y+55,Hex(Muted),"Activity");
+    Text(Body,x+720,y+52,Hex(White),"FastFTP-reads.csv");
+    Text(Small,x+944,y+55,Hex(Muted),"Read results");
 }
 
 // Bottom card: the latest completed results for the selected tab.
@@ -208,7 +233,7 @@ static void Results(const UiState& s,float x,float y,float w,float h) {
             if(i && s.downloadLimit) { _snprintf_s(text,sizeof(text),_TRUNCATE,"cap %d",s.downloadLimit); Text(Small,left+170+Width(Heading,"00.00 MiB/s")+16,y+56,Hex(Muted),text); }
         }
     } else {
-        const char* line=s.tab==TabDisk ? s.disk : s.ftp;
+        const char* line=s.tab==TabDisk ? s.disk : s.tab==TabRead ? s.read : s.ftp;
         Text(Body,x+28,y+52,Hex(line[0] ? White : Dim),line[0] ? line : "No result yet.");
     }
 }
@@ -244,9 +269,10 @@ static void Footer(const UiState& s,float y) {
         x=Button(x,y,"B",ButtonB,s.tab==TabFtp ? "Stop server" : "Stop");
         return;
     }
-    if(s.keyboard) { Text(Body,x,y+1,Hex(Muted),"Type the FTP user name, then the password."); return; }
-    static const char* start[]={"Start FTP server","Listen","Run disk test",NULL};
-    if(start[s.tab]) x=Button(x,y,"A",ButtonA,start[s.tab]);
+    if(s.keyboard) { Text(Body,x,y+1,Hex(Muted),s.keyboard==3 ? "Type the NetISO server's IP address." : "Type the FTP user name, then the password."); return; }
+    static const char* start[]={"Start FTP server","Listen","Run disk test","Run",NULL};
+    if(start[s.tab] && (s.tab!=TabRead || s.readFiles)) x=Button(x,y,"A",ButtonA,start[s.tab]);
+    if(s.tab==TabRead) { x=Button(x,y,"X",ButtonX,s.readFind); if(s.readServerKey) x=Button(x,y,"Y",ButtonY,"Server"); }
     if(s.tab==TabFtp) { x=Button(x,y,"Y",ButtonY,"Set login"); x=Button(x,y,"D-pad",0,"Login on/off"); }
     else if(SettingCount(s.tab)) x=Button(x,y,"D-pad",0,"Change settings");
     x=Button(x,y,"Back",0,"Exit");
@@ -263,7 +289,7 @@ void DrawUi(const UiState& s) {
     // Header: name and version, then the address to type into the PC app.
     Box(Left,Top+6,6,40,Hex(Green),3);
     Text(Heading,Left+20,Top,Hex(White),"FastFTP");
-    Text(Small,Left+20+Width(Heading,"FastFTP")+16,Top+14,Hex(Muted),"FTP server with network and disk tests  v0.4.1");
+    Text(Small,Left+20+Width(Heading,"FastFTP")+16,Top+14,Hex(Muted),"FTP server with network, disk and read tests  v0.5.0 experimental");
     bool online=strchr(s.ip,'.')!=NULL;
     TextRight(Heading,Right,Top,Hex(online ? White : Muted),s.ip);
     // The port only matters on the tabs that listen for the PC.
@@ -273,7 +299,7 @@ void DrawUi(const UiState& s) {
     List->AddCircleFilled(ImVec2(Right-Width(Small,text)-14,Top+57),5,Hex(online ? Green : ButtonY),12);
 
     // Tabs, switched with the bumpers while nothing runs.
-    static const char* tabs[]={"FTP server","Network","Disk","Settings"};
+    static const char* tabs[]={"FTP server","Network","Disk","Read test","Settings"};
     float x=Left,y=118;
     if(!s.busy) { Box(x,y+6,40,30,Hex(Raised),8); Text(Small,x+8,y+9,Hex(White),"LB"); x+=52; }
     for(int i=0;i<TabCount;++i) {
@@ -291,8 +317,11 @@ void DrawUi(const UiState& s) {
         Transfers(s,Left,440,Right-Left,176);
     } else {
         Status(s,Left,184,744,280);
-        if(s.tab==TabNetwork) PcApp(s,Left+764,184,Right-Left-764,280); else Settings(s,Left+764,184,Right-Left-764,280);
-        if(s.tab==TabSettings) Files(Left,484,Right-Left,110); else Results(s,Left,484,Right-Left,110);
+        if(s.tab==TabNetwork) PcApp(s,Left+764,184,Right-Left-764,280);
+        // The read test's six settings use the full height on the right.
+        else if(s.tab==TabRead) Settings(s,Left+764,184,Right-Left-764,410);
+        else Settings(s,Left+764,184,Right-Left-764,280);
+        if(s.tab==TabSettings) Files(Left,484,Right-Left,110); else Results(s,Left,484,s.tab==TabRead ? 744 : Right-Left,110);
     }
 
     Footer(s,628);

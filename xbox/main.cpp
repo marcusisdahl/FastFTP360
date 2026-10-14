@@ -6,6 +6,7 @@
 #include "../shared/bench.h"
 #include "../shared/ui.h"
 #include "../shared/ftp.h"
+#include "../shared/readbench.h"
 #include "../third_party/imgui/imgui.h"
 #include "imgui_impl_xbox360.h"
 
@@ -49,6 +50,31 @@ static int DiskChoice=0;
 static const DWORD DiskBlocks[]={65536,262144,1048576};
 static int DiskBlockChoice=2;
 enum { DiskTestBytes=256*1048576 };
+// Read test sources. Local drives are linked as \??\NBREAD: while their files
+// are listed or read, then unlinked. The read test opens files read-only and
+// never writes to the drive, the server or the file.
+enum { ReadLocal, ReadNetIso, ReadConnectX };
+struct ReadSourceInfo { const char* name; const char* device; const char* drive; int kind; };
+static const ReadSourceInfo ReadSources[]={{"Internal HDD","\\Device\\Harddisk0\\Partition1","Hdd1",ReadLocal},
+    {"USB 0","\\Device\\Mass0","Usb0",ReadLocal},{"USB 1","\\Device\\Mass1","Usb1",ReadLocal},{"App drive",NULL,"Game",ReadLocal},
+    {"NetISO protocol",NULL,NULL,ReadNetIso},{"ConnectX",NULL,NULL,ReadConnectX}};
+enum { ReadSourceCount=sizeof(ReadSources)/sizeof(ReadSources[0]) };
+static int ReadSourceChoice=0,ReadFileChoice=0,ReadWorkloadChoice=nb::ReadSeq1M,ReadDurationChoice=1;
+static bool ReadCheckOn=true,ReadCacheBypass=true;
+static const DWORD ReadDurations[]={10,30,60,120};
+static nb::ReadSettings ReadIni;
+// Files (or ISO names) found by X for the selected source.
+static char ReadFiles[nb::ReadMaxFiles][nb::ReadNameMax];
+static int ReadFileCount=0;
+static char ReadListNote[64]="";
+// Runs per source and file this session, so a repeat is never shown as a first pass.
+struct ReadPass { int source; char file[nb::ReadNameMax]; int count; };
+static ReadPass ReadPasses[16];
+static int ReadPassCount=0;
+static const char ReadCsvFile[]="game:\\FastFTP-reads.csv";
+// Optional modules are only looked up, never loaded or unloaded.
+static const char ConnectXModule[]="connectx.xex",NetIsoModule[]="NetISO.xex";
+static bool ModuleLoaded(const char* name) { return GetModuleHandle(name)!=NULL; }
 struct KernelString { USHORT length,capacity; char* text; };
 extern "C" LONG __stdcall ObCreateSymbolicLink(KernelString* link,KernelString* device);
 extern "C" LONG __stdcall ObDeleteSymbolicLink(KernelString* link);
@@ -116,15 +142,19 @@ static void RotateLog() {
     LeaveCriticalSection(&LogLock);
 }
 
-static void LoadLogin() {
+// FastFTP.ini holds the FTP login and the read test's settings.
+static void LoadSettings() {
     HANDLE file=CreateFile(LoginFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) return;
-    char text[512]; DWORD read=0;
-    if(ReadFile(file,text,sizeof(text)-1,&read,NULL)) { text[read]=0; nb::ParseFtpLogin(text,FtpLoginRequired,FtpUser,FtpPassword); }
+    char text[1024]; DWORD read=0;
+    if(ReadFile(file,text,sizeof(text)-1,&read,NULL)) {
+        text[read]=0; nb::ParseFtpLogin(text,FtpLoginRequired,FtpUser,FtpPassword); nb::ParseReadSettings(text,ReadIni);
+    }
     CloseHandle(file);
 }
-static bool SaveLogin() {
-    char text[160]; nb::FormatFtpLogin(text,sizeof(text),FtpLoginRequired,FtpUser,FtpPassword);
+static bool SaveSettings() {
+    char text[720]; nb::FormatFtpLogin(text,sizeof(text),FtpLoginRequired,FtpUser,FtpPassword);
+    size_t used=strlen(text); nb::FormatReadSettings(text+used,sizeof(text)-used,ReadIni);
     HANDLE file=CreateFile(LoginFile,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) return false;
     DWORD written=0; bool ok=WriteFile(file,text,DWORD(strlen(text)),&written,NULL) && written==strlen(text);
@@ -158,14 +188,56 @@ static void DescribeSettings() {
     else _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u KiB",DiskBlocks[DiskBlockChoice]/1024);
     strcpy_s(State.drawing,DrawDuringTransfers ? "Live" : "Paused");
     strcpy_s(State.ftpUser,FtpLoginRequired ? FtpUser : ""); strcpy_s(State.ftpPassword,FtpLoginRequired ? FtpPassword : "");
+    const ReadSourceInfo& source=ReadSources[ReadSourceChoice];
+    strcpy_s(State.readSource,source.name);
+    if(ReadFileCount) _snprintf_s(State.readFile,sizeof(State.readFile),_TRUNCATE,"%s",ReadFiles[ReadFileChoice]);
+    else strcpy_s(State.readFile,"Press X first");
+    strcpy_s(State.readWorkload,nb::WorkloadName(ReadWorkloadChoice));
+    _snprintf_s(State.readDuration,sizeof(State.readDuration),_TRUNCATE,"%u s",ReadDurations[ReadDurationChoice]);
+    strcpy_s(State.readCheck,ReadCheckOn ? "On" : "Off");
+    strcpy_s(State.readCache,source.kind==ReadNetIso ? "Not used" : ReadCacheBypass ? "Bypassed" : "Normal");
+    strcpy_s(State.readFind,source.kind==ReadLocal ? "Find files" : source.kind==ReadNetIso ? "List ISOs" : "Check ConnectX");
+    State.readFiles=ReadFileCount; State.readServerKey=source.kind==ReadNetIso;
+    char (*lines)[64]=State.readLines;
+    if(source.kind==ReadLocal) {
+        _snprintf_s(lines[0],64,_TRUNCATE,"Reads an existing file in %s:\\%s.",source.drive,ReadIni.folder);
+        strcpy_s(lines[1],64,"Read only, separate from the disk write test.");
+        _snprintf_s(lines[2],64,_TRUNCATE,"%s",ReadListNote[0] ? ReadListNote : "X lists the files in that folder.");
+    } else if(source.kind==ReadNetIso) {
+        strcpy_s(lines[0],64,"Reads the ISO straight from the server and");
+        strcpy_s(lines[1],64,"bypasses the console's NetISO plugin.");
+        char server[32]; nb::FormatServer(server,sizeof(server),ReadIni.server,ReadIni.port);
+        if(ReadIni.server) _snprintf_s(lines[2],64,_TRUNCATE,"Server %s. %s",server,ReadListNote);
+        else strcpy_s(lines[2],64,"No server set yet. Y sets it.");
+    } else if(!ModuleLoaded(ConnectXModule)) {
+        strcpy_s(lines[0],64,"ConnectX module (connectx.xex) is not loaded.");
+        strcpy_s(lines[1],64,"This test stays off. FastFTP never loads it.");
+        strcpy_s(lines[2],64,"Other tests and the FTP server are not affected.");
+    } else if(!ReadIni.connectx[0]) {
+        strcpy_s(lines[0],64,"ConnectX module is loaded. Its folder is not set:");
+        strcpy_s(lines[1],64,"add connectx_folder= to FastFTP.ini. See the");
+        strcpy_s(lines[2],64,"README; FastFTP does not guess the path.");
+    } else {
+        strcpy_s(lines[0],64,"ConnectX module is loaded. Reads through it from");
+        _snprintf_s(lines[1],64,_TRUNCATE,"%s",ReadIni.connectx);
+        _snprintf_s(lines[2],64,_TRUNCATE,"%s",ReadListNote[0] ? ReadListNote : "X lists the files in that folder.");
+    }
 }
 // Steps the focused setting on the current tab by one choice (D-pad left/right).
 static void ChangeSetting(int tab,int row,int step) {
     const int buffers=sizeof(BufferChoices)/sizeof(BufferChoices[0]),targets=sizeof(DiskTargets)/sizeof(DiskTargets[0]),
         blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]);
-    if(tab==nb::TabFtp) { FtpLoginRequired=!FtpLoginRequired; SaveLogin(); }
+    if(tab==nb::TabFtp) { FtpLoginRequired=!FtpLoginRequired; SaveSettings(); }
     else if(tab==nb::TabDisk) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
+    }
+    else if(tab==nb::TabRead) {
+        if(row==0) { ReadSourceChoice=(ReadSourceChoice+ReadSourceCount+step)%ReadSourceCount; ReadFileCount=0; ReadFileChoice=0; ReadListNote[0]=0; }
+        else if(row==1) { if(ReadFileCount) ReadFileChoice=(ReadFileChoice+ReadFileCount+step)%ReadFileCount; }
+        else if(row==2) ReadWorkloadChoice=(ReadWorkloadChoice+nb::ReadWorkloadCount+step)%nb::ReadWorkloadCount;
+        else if(row==3) ReadDurationChoice=(ReadDurationChoice+4+step)%4;
+        else if(row==4) ReadCheckOn=!ReadCheckOn;
+        else ReadCacheBypass=!ReadCacheBypass;
     }
     // Advanced settings, kept off the everyday tabs.
     else if(tab==nb::TabSettings) {
@@ -467,11 +539,201 @@ static DWORD WINAPI ServerThread(void*) {
     LeaveCriticalSection(&StateLock);
     return 0;
 }
+// Read test worker threads. Settings cannot change while a worker runs, so the
+// workers read the choices above without the lock.
+static bool ReadCancelled(void*) { return IsCancelled(NULL); }
+static void ReadProgress(void*,int phase,nb::U64 bytes,double seconds,double rate) {
+    if(phase!=nb::ReadWarming && phase!=nb::ReadMeasuring) return;
+    EnterCriticalSection(&StateLock);
+    State.readPhase=phase==nb::ReadWarming ? 2 : 3;
+    State.mebibytes=double(bytes)/1048576; State.elapsed=seconds; State.rate=rate;
+    LeaveCriticalSection(&StateLock);
+}
+// The folder X lists and A reads from, without a trailing backslash.
+static bool ReadFolder(const ReadSourceInfo& source,char* folder,size_t capacity,bool& linked,char* error,size_t errorCapacity) {
+    linked=false;
+    if(source.kind==ReadConnectX) {
+        if(!ModuleLoaded(ConnectXModule)) { _snprintf_s(error,errorCapacity,_TRUNCATE,"ConnectX is not loaded (no %s module). This test is off.",ConnectXModule); return false; }
+        if(!ReadIni.connectx[0]) { strcpy_s(error,errorCapacity,"Set connectx_folder= in FastFTP.ini first. See the README."); return false; }
+        _snprintf_s(folder,capacity,_TRUNCATE,"%s",ReadIni.connectx);
+        size_t length=strlen(folder); if(length && folder[length-1]=='\\') folder[length-1]=0;
+        return true;
+    }
+    const char* root="game:";
+    if(source.device) {
+        LONG status=LinkDrive("\\??\\NBREAD:",source.device);
+        if(status<0) { _snprintf_s(error,errorCapacity,_TRUNCATE,"%s not found or not mountable (0x%08X).",source.name,DWORD(status)); return false; }
+        linked=true; root="NBREAD:";
+    }
+    _snprintf_s(folder,capacity,_TRUNCATE,"%s\\%s",root,ReadIni.folder);
+    return true;
+}
+static int CompareNames(const void* a,const void* b) { return _stricmp(static_cast<const char*>(a),static_cast<const char*>(b)); }
+static void ReadDone(const char* error,const char* note) {
+    EnterCriticalSection(&StateLock);
+    State.readPhase=0; State.armed=0;
+    if(note) strcpy_s(ReadListNote,note);
+    DescribeSettings();
+    if(error) { State.phase=nb::Failed; _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"%s",error); }
+    else { State.phase=nb::Idle; State.message[0]=0; }
+    LeaveCriticalSection(&StateLock);
+}
+// X: lists the files in the source's folder, or the ISOs on the NetISO server.
+static char ScanNames[nb::ReadMaxFiles][nb::ReadNameMax];
+static DWORD WINAPI ReadScanThread(void*) {
+    const ReadSourceInfo& source=ReadSources[ReadSourceChoice];
+    char error[160]={0},note[64]={0}; int count=0;
+    EnterCriticalSection(&StateLock); State.readPhase=1; State.message[0]=0; LeaveCriticalSection(&StateLock);
+    if(source.kind==ReadNetIso) {
+        nb::ReadObserver observer={NULL,ReadCancelled,NULL};
+        nb::NetIsoClient client(observer,5);
+        if(!ReadIni.server) strcpy_s(error,"Set the NetISO server first with Y.");
+        else if(!client.Connect(ReadIni.server,ReadIni.port,5) || !client.PingServer() || !client.ListIsos(ScanNames,nb::ReadMaxFiles,count))
+            _snprintf_s(error,sizeof(error),_TRUNCATE,"NetISO server: %s",client.Error());
+        else if(!count) strcpy_s(error,"The NetISO server lists no ISOs.");
+        else _snprintf_s(note,sizeof(note),_TRUNCATE,"%d ISO%s listed%s.",count,count==1 ? "" : "s",count==nb::ReadMaxFiles ? " (the first 64)" : "");
+    } else {
+        char folder[nb::ReadFolderMax+16]; bool linked=false;
+        if(ReadFolder(source,folder,sizeof(folder),linked,error,sizeof(error))) {
+            char pattern[nb::ReadFolderMax+20]; _snprintf_s(pattern,sizeof(pattern),_TRUNCATE,"%s\\*",folder);
+            WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(pattern,&entry);
+            if(find==INVALID_HANDLE_VALUE) {
+                DWORD code=GetLastError();
+                if(code==ERROR_FILE_NOT_FOUND) count=0;
+                else _snprintf_s(error,sizeof(error),_TRUNCATE,"Cannot open %s (%u). Create the folder and copy files there with FTP.",folder,code);
+            } else {
+                do {
+                    if(entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) continue;
+                    if(strlen(entry.cFileName)>=nb::ReadNameMax) continue;
+                    strcpy_s(ScanNames[count],entry.cFileName); ++count;
+                } while(count<nb::ReadMaxFiles && FindNextFile(find,&entry));
+                FindClose(find);
+            }
+            if(!error[0] && !count) _snprintf_s(error,sizeof(error),_TRUNCATE,"No files in %s. Copy a big file there with FTP.",folder);
+            if(!error[0]) _snprintf_s(note,sizeof(note),_TRUNCATE,"%d file%s found.",count,count==1 ? "" : "s");
+            qsort(ScanNames,count,sizeof(ScanNames[0]),CompareNames);
+        }
+        if(linked) UnlinkDrive("\\??\\NBREAD:");
+    }
+    EnterCriticalSection(&StateLock);
+    if(!error[0]) { memcpy(ReadFiles,ScanNames,sizeof(ScanNames[0])*count); ReadFileCount=count; ReadFileChoice=0; }
+    else ReadFileCount=0;
+    LeaveCriticalSection(&StateLock);
+    if(IsCancelled(NULL)) ReadDone("Stopped.",NULL); else ReadDone(error[0] ? error : NULL,note);
+    return 0;
+}
+static void AppendReadCsv(const char* line) {
+    EnterCriticalSection(&LogLock);
+    HANDLE file=CreateFile(ReadCsvFile,GENERIC_WRITE,FILE_SHARE_READ,NULL,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file!=INVALID_HANDLE_VALUE) {
+        DWORD high=0,written=0; const DWORD size=GetFileSize(file,&high);
+        SetFilePointer(file,0,NULL,FILE_END);
+        if(size==0 && high==0) WriteFile(file,nb::ReadCsvHeader(),DWORD(strlen(nb::ReadCsvHeader())),&written,NULL);
+        WriteFile(file,line,DWORD(strlen(line)),&written,NULL);
+        CloseHandle(file);
+    }
+    LeaveCriticalSection(&LogLock);
+}
+// A: one read benchmark run on the selected file. Completed, cancelled and
+// failed runs are all written to FastFTP.log and FastFTP-reads.csv.
+static DWORD WINAPI ReadRunThread(void*) {
+    const ReadSourceInfo& source=ReadSources[ReadSourceChoice];
+    char file[nb::ReadNameMax]; strcpy_s(file,ReadFiles[ReadFileChoice]);
+    nb::ReadConfig config;
+    config.workload=ReadWorkloadChoice; config.seconds=ReadDurations[ReadDurationChoice]; config.seed=ReadIni.seed;
+    config.verify=ReadCheckOn; config.fixture=nb::FixtureSeed(file,config.fixtureSeed);
+    nb::ReadObserver observer={NULL,ReadCancelled,ReadProgress};
+    nb::ReadResult result;
+    EnterCriticalSection(&StateLock);
+    State.readPhase=1; State.armed=1; State.duration=int(config.seconds); State.message[0]=0; State.mebibytes=State.elapsed=State.rate=0;
+    LeaveCriticalSection(&StateLock);
+    const double setupStart=nb::Now();
+    unsigned char* buffer=static_cast<unsigned char*>(VirtualAlloc(NULL,nb::ReadMaxRequest,MEM_COMMIT,PAGE_READWRITE));
+    nb::FileReadBackend local;
+    nb::NetIsoClient netiso(observer,10);
+    nb::ReadBackend* backend=NULL;
+    bool linked=false;
+    char shown[nb::ReadFolderMax+nb::ReadNameMax+16]="",server[32]="",cache[48];
+    if(source.kind==ReadNetIso) {
+        nb::FormatServer(server,sizeof(server),ReadIni.server,ReadIni.port);
+        strcpy_s(cache,"not used (server cache not controlled)");
+        strcpy_s(shown,file);
+    } else strcpy_s(cache,ReadCacheBypass ? "bypassed (no buffering)" : "normal");
+    if(!buffer) strcpy_s(result.error,"Could not allocate the 1 MiB read buffer.");
+    else if(source.kind==ReadNetIso) {
+        if(!ReadIni.server) strcpy_s(result.error,"Set the NetISO server first with Y.");
+        else if(netiso.Connect(ReadIni.server,ReadIni.port,5) && netiso.PingServer() && netiso.Mount(file,ReadFiles,ReadFileCount)) backend=&netiso;
+        else _snprintf_s(result.error,sizeof(result.error),_TRUNCATE,"NetISO server: %s",netiso.Error());
+    } else {
+        char folder[nb::ReadFolderMax+16];
+        if(ReadFolder(source,folder,sizeof(folder),linked,result.error,sizeof(result.error))) {
+            char path[sizeof(shown)]; _snprintf_s(path,sizeof(path),_TRUNCATE,"%s\\%s",folder,file);
+            if(source.kind==ReadLocal) _snprintf_s(shown,sizeof(shown),_TRUNCATE,"%s:\\%s\\%s",source.drive,ReadIni.folder,file);
+            else strcpy_s(shown,path);
+            if(local.Open(path,ReadCacheBypass,nb::WorkloadRandom(ReadWorkloadChoice))) backend=&local;
+            else _snprintf_s(result.error,sizeof(result.error),_TRUNCATE,"%s: %s",file,local.Error());
+        }
+    }
+    result.setupSeconds=nb::Now()-setupStart;
+    // As in the network test: when drawing pauses, wait until the screen has
+    // stopped before any benchmark data moves.
+    if(backend && !DrawDuringTransfers) {
+        bool idle=false;
+        if(GraphicsIdle && ResetEvent(GraphicsIdle)) {
+            EnterCriticalSection(&StateLock); State.readPhase=2; LeaveCriticalSection(&StateLock);
+            const double deadline=nb::Now()+5;
+            while(!idle && !IsCancelled(NULL) && nb::Now()<deadline) idle=WaitForSingleObject(GraphicsIdle,100)==WAIT_OBJECT_0;
+        }
+        if(!idle) { backend=NULL; if(!IsCancelled(NULL)) strcpy_s(result.error,"The screen did not pause in time. Nothing was read."); }
+    }
+    int pass=0;
+    if(backend) {
+        // First pass or repeat for this source and file in this session.
+        int i=0;
+        for(;i<ReadPassCount;++i) if(ReadPasses[i].source==ReadSourceChoice && !strcmp(ReadPasses[i].file,file)) break;
+        if(i==ReadPassCount) {
+            if(ReadPassCount<16) ++ReadPassCount; else i=15;
+            ReadPasses[i].source=ReadSourceChoice; strcpy_s(ReadPasses[i].file,file); ReadPasses[i].count=0;
+        }
+        pass=++ReadPasses[i].count;
+        nb::RunReadBenchmark(*backend,config,observer,buffer,result);
+    } else result.status=IsCancelled(NULL) ? nb::ReadCancelled : nb::ReadFailed;
+    if(result.status==nb::ReadCancelled && !result.error[0]) strcpy_s(result.error,"Cancelled");
+    local.Close(); netiso.Close();
+    if(linked) UnlinkDrive("\\??\\NBREAD:");
+    if(buffer) VirtualFree(buffer,0,MEM_RELEASE);
+
+    nb::ReadReport report={source.name,server,shown[0] ? shown : file,cache,ReadWorkloadChoice,pass,config.seconds,config.seed};
+    char line[700]; nb::FormatReadLog(line,sizeof(line),report,result); WriteLog(line);
+    SYSTEMTIME now; GetLocalTime(&now);
+    char date[24]; _snprintf_s(date,sizeof(date),_TRUNCATE,"%04u-%02u-%02u %02u:%02u:%02u",now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond);
+    char csv[900]; nb::FormatReadCsv(csv,sizeof(csv),date,report,result); AppendReadCsv(csv);
+
+    EnterCriticalSection(&StateLock);
+    State.readPhase=0; State.armed=0;
+    const unsigned errors=result.failed+result.shortReads+result.timeouts+result.integrity;
+    if(result.status==nb::ReadCompleted) {
+        State.phase=nb::Idle;
+        _snprintf_s(State.read,sizeof(State.read),_TRUNCATE,"%s, %s: %.2f MiB/s, p99 %.1f ms, pass %d",
+            source.kind==ReadLocal ? source.drive : source.name,nb::WorkloadName(ReadWorkloadChoice),result.Rate(),result.latencyP99,pass);
+        _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,
+            "Completed. %.2f MiB/s, %.1f reads/s. Latency ms: mean %.1f, p50 %.1f, p95 %.1f, p99 %.1f, max %.1f. %s, %s, %u error%s.",
+            result.Rate(),result.Operations(),result.latencyMean,result.latencyP50,result.latencyP95,result.latencyP99,result.latencyMax,
+            pass==1 ? "First pass this session" : "Repeat run (data may be cached)",
+            result.verify==nb::VerifyKnownData ? "known data checked" : result.verify==nb::VerifyCounts ? "byte counts checked" : "check off",
+            errors,errors==1 ? "" : "s");
+    } else if(result.status==nb::ReadCancelled) { State.phase=nb::Stopped; strcpy_s(State.message,"Read test stopped. Nothing was written."); }
+    else { State.phase=nb::Failed; _snprintf_s(State.message,sizeof(State.message),_TRUNCATE,"Read test failed. %s",result.error); }
+    LeaveCriticalSection(&StateLock);
+    return 0;
+}
 static bool OpenKeyboard(DWORD pad,int step,const char* current) {
     WCHAR initial[nb::FtpLoginMax+1];
     for(int i=0;;++i) { initial[i]=WCHAR(current[i]); if(!current[i]) break; }
     memset(&KeyboardOverlapped,0,sizeof(KeyboardOverlapped)); KeyboardText[0]=0;
-    DWORD result=XShowKeyboardUI(pad,VKBD_DEFAULT,initial,step==1 ? L"FTP user name" : L"FTP password",
+    // Step 3 is the read test's NetISO server address, not part of the login.
+    DWORD result=XShowKeyboardUI(pad,VKBD_DEFAULT,initial,step==1 ? L"FTP user name" : step==2 ? L"FTP password" : L"NetISO server",
+        step==3 ? L"IP address of the PC running the NetISO server, such as 192.168.1.20 or 192.168.1.20:4323." :
         L"Up to 23 characters: letters, digits and symbols, no spaces.",KeyboardText,nb::FtpLoginMax+2,&KeyboardOverlapped);
     if(result!=ERROR_IO_PENDING && result!=ERROR_SUCCESS) return false;
     KeyboardStep=step; KeyboardPad=pad; return true;
@@ -487,6 +749,15 @@ static void PollKeyboard() {
     char text[nb::FtpLoginMax+2]; int i=0;
     for(;KeyboardText[i] && i<nb::FtpLoginMax+1;++i) text[i]=KeyboardText[i]<0x80 ? char(KeyboardText[i]) : '\x01';
     text[i]=0;
+    if(step==3) {
+        DWORD address=0; int port=ReadIni.port;
+        if(!nb::ParseServer(text,address,port)) { LoginMessage("Server unchanged: type an IP address such as 192.168.1.20 or 192.168.1.20:4323."); return; }
+        EnterCriticalSection(&StateLock);
+        ReadIni.server=address; ReadIni.port=port; ReadFileCount=0; ReadFileChoice=0; ReadListNote[0]=0; DescribeSettings();
+        LeaveCriticalSection(&StateLock);
+        LoginMessage(SaveSettings() ? "NetISO server saved in FastFTP.ini. Press X to list its ISOs." : "Server changed, but FastFTP.ini could not be saved.");
+        return;
+    }
     if(!nb::ValidFtpLogin(text)) { LoginMessage("Login unchanged: use 1-23 letters, digits or symbols, no spaces."); return; }
     if(step==1) {
         strcpy_s(PendingUser,text);
@@ -497,7 +768,7 @@ static void PollKeyboard() {
     strcpy_s(FtpUser,PendingUser); strcpy_s(FtpPassword,text); FtpLoginRequired=true; DescribeSettings();
     LeaveCriticalSection(&StateLock);
     char line[80]; _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP login changed on the Xbox (user %s)",PendingUser); WriteLog(line);
-    LoginMessage(SaveLogin() ? "Login changed and saved in FastFTP.ini." : "Login changed, but FastFTP.ini could not be saved.");
+    LoginMessage(SaveSettings() ? "Login changed and saved in FastFTP.ini." : "Login changed, but FastFTP.ini could not be saved.");
 }
 
 static bool InitGraphics() {
@@ -521,7 +792,7 @@ static void Render(const nb::UiState& state,float seconds) {
 void __cdecl main() {
     InitializeCriticalSection(&StateLock); InitializeCriticalSection(&LogLock);
     for(int i=0;i<nb::MaxStreams;++i) { Streams[i].thread=NULL; Streams[i].socket=INVALID_SOCKET; }
-    LoadLogin();
+    LoadSettings();
     DescribeSettings();
     nb::InitUi();
     if(!InitGraphics()) XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);
@@ -554,6 +825,25 @@ void __cdecl main() {
         if(KeyboardStep) { PollKeyboard(); pressed=0; }
         if((pressed&XINPUT_GAMEPAD_Y) && !Worker && State.tab==nb::TabFtp &&
             !OpenKeyboard(keyboardPad,1,FtpUser)) LoginMessage("Could not open the keyboard.");
+        if((pressed&XINPUT_GAMEPAD_Y) && !Worker && State.tab==nb::TabRead && ReadSources[ReadSourceChoice].kind==ReadNetIso) {
+            char current[32]=""; if(ReadIni.server) nb::FormatServer(current,sizeof(current),ReadIni.server,ReadIni.port);
+            if(!OpenKeyboard(keyboardPad,3,current)) LoginMessage("Could not open the keyboard.");
+        }
+        // Read test: X lists files (or ISOs), A runs on the selected one.
+        if((pressed&XINPUT_GAMEPAD_X) && !Worker && State.tab==nb::TabRead) {
+            InterlockedExchange(&Cancel,0);
+            Worker=CreateThread(NULL,64*1024,ReadScanThread,NULL,0,NULL);
+            if(!Worker) Failure("Could not start the file list.");
+        }
+        if((pressed&XINPUT_GAMEPAD_A) && !Worker && State.tab==nb::TabRead) {
+            if(!ReadFileCount) LoginMessage("Press X to find a file first.");
+            else if(ReadSources[ReadSourceChoice].kind==ReadNetIso && !NetworkReady) Failure("The network is not ready.");
+            else {
+                InterlockedExchange(&Cancel,0);
+                Worker=CreateThread(NULL,128*1024,ReadRunThread,NULL,0,NULL);
+                if(!Worker) Failure("Could not start the read test.");
+            }
+        }
         // A starts whatever the current tab is for; B stops it.
         if((pressed&XINPUT_GAMEPAD_A) && !Worker && State.tab==nb::TabNetwork && NetworkReady) {
             InterlockedExchange(&Cancel,0);
@@ -596,11 +886,12 @@ void __cdecl main() {
         }
         if((pressed&XINPUT_GAMEPAD_BACK) && !Worker) break;
         EnterCriticalSection(&StateLock); nb::UiState snapshot=State; LeaveCriticalSection(&StateLock);
-        snapshot.busy=Worker!=NULL; snapshot.keyboard=KeyboardStep!=0;
+        snapshot.busy=Worker!=NULL; snapshot.keyboard=KeyboardStep;
         const double now=nb::Now(); const float seconds=float(now-lastFrame); lastFrame=now;
         // Hold one static frame while data moves if the PC asked for it, or
         // unless drawing during transfers is switched on.
-        const bool transfer=snapshot.ftpPhase>1 || (snapshot.armed && !snapshot.ftpPhase && snapshot.phase>=nb::Connecting && snapshot.phase<=nb::Measuring);
+        const bool transfer=snapshot.ftpPhase>1 || snapshot.readPhase>=2 ||
+            (snapshot.armed && !snapshot.ftpPhase && !snapshot.readPhase && snapshot.phase>=nb::Connecting && snapshot.phase<=nb::Measuring);
         if(snapshot.armed && ((snapshot.options&nb::PauseDrawing) || (transfer && !DrawDuringTransfers))) {
             if(!renderingPaused) {
                 snapshot.options|=nb::PauseDrawing;

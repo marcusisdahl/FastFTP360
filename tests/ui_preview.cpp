@@ -98,6 +98,26 @@ int main(int argc,char** argv) {
     } else if(!strcmp(scene,"diskidle")) {
         state.tab=nb::TabDisk; state.focus=0;
         strcpy_s(state.disk,"HDD, 1024 KiB blocks: write 57.52, read 57.21 MiB/s, all data checked");
+    } else if(!strcmp(scene,"read") || !strcmp(scene,"readnet") || !strcmp(scene,"readrun") || !strcmp(scene,"readcx")) {
+        state.tab=nb::TabRead; state.focus=1; state.readFiles=3; state.duration=30;
+        strcpy_s(state.readSource,"Internal HDD"); strcpy_s(state.readFile,"FFTPFIX-0000002A.bin"); strcpy_s(state.readWorkload,"Sequential 1 MiB");
+        strcpy_s(state.readDuration,"30 s"); strcpy_s(state.readCheck,"On"); strcpy_s(state.readCache,"Bypassed"); strcpy_s(state.readFind,"Find files");
+        strcpy_s(state.readLines[0],"Reads an existing file in Hdd1:\\FastFTP-Bench."); strcpy_s(state.readLines[1],"Read only, separate from the disk write test.");
+        strcpy_s(state.readLines[2],"3 files found. A runs, B stops.");
+        strcpy_s(state.read,"HDD, Sequential 1 MiB: 56.84 MiB/s, p99 21.4 ms, pass 1");
+        if(!strcmp(scene,"readnet")) {
+            strcpy_s(state.readSource,"NetISO protocol"); strcpy_s(state.readFile,"Halo 3 (USA, Europe) (En,Ja,Fr,De,Es,It).iso"); strcpy_s(state.readCache,"Not used");
+            strcpy_s(state.readFind,"List ISOs"); state.readServerKey=1;
+            strcpy_s(state.readLines[0],"Reads the ISO straight from the server and"); strcpy_s(state.readLines[1],"bypasses the console's NetISO plugin.");
+            strcpy_s(state.readLines[2],"Server 192.168.1.20:4323. 12 ISOs listed.");
+            strcpy_s(state.message,"Completed. 26.91 MiB/s, 26.9 reads/s. Latency ms: mean 37.2, p50 36.9, p95 41.1, p99 52.4, max 80.3. Pass 2 of this ISO (repeat), known data checked, no errors.");
+        } else if(!strcmp(scene,"readcx")) {
+            strcpy_s(state.readSource,"ConnectX"); strcpy_s(state.readFile,"No files yet"); state.readFiles=0; strcpy_s(state.readFind,"Check ConnectX");
+            strcpy_s(state.readLines[0],"ConnectX module (connectx.xex) is not loaded."); strcpy_s(state.readLines[1],"This test stays off. FastFTP never loads it.");
+            strcpy_s(state.readLines[2],"Other tests and the FTP server are not affected.");
+        } else if(!strcmp(scene,"readrun")) {
+            state.busy=1; state.armed=1; state.readPhase=3; state.elapsed=12.4; state.mebibytes=331.0; state.rate=26.7;
+        }
     } else if(!strcmp(scene,"settings")) {
         state.tab=nb::TabSettings; state.focus=2;
     } else { state.phase=0; state.download=0; }
