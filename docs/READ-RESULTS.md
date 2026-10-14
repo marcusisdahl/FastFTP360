@@ -1,13 +1,13 @@
 # Read test results
 
-How fast can an Xbox 360 game read its data over the network, compared with a disc, the internal hard drive and a USB drive? This page collects the numbers measured so far with FastFTP's **Read test**, alongside published figures for the parts we could not measure. Each figure says where it comes from.
+How fast can an Xbox 360 game read its data over the network, compared with a disc or a USB drive? This page collects the numbers measured so far with FastFTP's **Read test**, alongside published figures for the parts we could not measure. Each figure says where it comes from.
 
 > **Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** These results come from one console. They show that FastFTP 0.5.0's Read test ran and returned these numbers there. They are not a full pass of the [console checklist](CONSOLE-TEST-CHECKLIST.md).
 
 - [Summary](#summary)
 - [NetISO protocol: built-in Ethernet versus UE306](#netiso-protocol-built-in-ethernet-versus-ue306)
 - [Game disc](#game-disc)
-- [Internal HDD and external USB drive](#internal-hdd-and-external-usb-drive)
+- [External USB drive](#external-usb-drive)
 - [What this means for game loading](#what-this-means-for-game-loading)
 - [Filling the gaps](#filling-the-gaps)
 - [Sources](#sources)
@@ -19,7 +19,6 @@ How fast can an Xbox 360 game read its data over the network, compared with a di
 | **NetISO protocol, UE306 + CUsbEnet** | 27.10 MiB/s | 22.21 MiB/s (2.8 ms) | 13.28 MiB/s (1.2 ms) | 5.80 MiB/s (0.67 ms) | Measured |
 | **NetISO protocol, built-in 100 Mbit port** | 11.23 MiB/s | 10.41 MiB/s (6.0 ms) | 8.91 MiB/s (1.8 ms) | 6.77 MiB/s (0.58 ms) | Measured |
 | **Game disc (12x DVD)** | 6.6 to 15.7 MiB/s, about 11 on average | about 0.3 to 0.4 MiB/s (150 to 200 ms) | about 0.1 MiB/s | about 0.02 MiB/s | Published figures; random reads estimated from seek time |
-| **Internal HDD** | about 57 MiB/s | not measured | not measured | not measured | Measured, Disk tab |
 | **External USB drive** | not measured | not measured | not measured | not measured | |
 
 Figures in brackets are the time per read. MiB/s for random reads is reads per second × request size.
@@ -27,9 +26,9 @@ Figures in brackets are the time per read. MiB/s for random reads is reads per s
 ```mermaid
 xychart-beta
     title "Sequential reads (MiB/s)"
-    x-axis ["Disc inner", "Disc average", "Disc outer", "NetISO built-in", "NetISO UE306", "Internal HDD"]
-    y-axis "MiB/s" 0 --> 60
-    bar [6.6, 11, 15.7, 11.23, 27.10, 57]
+    x-axis ["Disc inner", "Disc average", "Disc outer", "NetISO built-in", "NetISO UE306"]
+    y-axis "MiB/s" 0 --> 30
+    bar [6.6, 11, 15.7, 11.23, 27.10]
 ```
 
 ## NetISO protocol: built-in Ethernet versus UE306
@@ -72,25 +71,24 @@ The test console's DVD drive is broken, so the disc figures come from published 
 
 Random-read rates in the summary are estimates: one seek of 150 to 200 ms plus the transfer time, per read.
 
-## Internal HDD and external USB drive
+## External USB drive
 
-- **Internal HDD:** the Disk tab on this console read its 256 MiB test file at about 57 MiB/s, which is about twice as fast as the UE306. Random reads have not been run on it yet.
-- **External USB drive:** not measured with the Read test yet. On the Xbox, a USB drive shares the USB 2 controller with a USB Ethernet adapter. FTP uploads to a USB drive, which use the network and the drive at the same time, reached only about 8.5 MiB/s. A Read test on its own does not use the network, so it should do much better than that.
+The external USB drive has not been measured with the Read test yet. On the Xbox, a USB drive shares the USB 2 controller with a USB Ethernet adapter. FTP uploads to a USB drive, which use the network and the drive at the same time, reached only about 8.5 MiB/s. A Read test on its own does not use the network, so it should do much better than that.
 
 ## What this means for game loading
 
 This section is inferred from the numbers above. Load times themselves have not been measured.
 
-- **For bulk reads**, NetISO over the UE306 is about 1.7 times faster than a disc at its best and about 2.4 times faster than a disc's average. The internal HDD is about twice as fast again. The built-in port is roughly as fast as a disc.
+- **For bulk reads**, NetISO over the UE306 is about 1.7 times faster than a disc at its best and about 2.4 times faster than a disc's average. The built-in port is roughly as fast as a disc.
 - **For scattered reads**, any network path is 50 to 250 times faster per read than a disc, because nothing has to seek.
 - **Real load times will improve far less than those ratios.** Games are laid out on disc to avoid seeks. Published tests of games installed to the hard drive found them 0 to 16 s faster than from disc, on loads of 25 to 45 s, because much of loading is the console unpacking and setting up data. NetISO over the UE306 should therefore load roughly like a game installed to the hard drive: clearly better than disc on games that seek a lot, but not several times faster overall.
 
 ## Filling the gaps
 
 1. Make a known-data fixture smaller than 4 GiB, so it fits on FATX and FAT32: `build\host\read-host.exe fixture C:\ISOs\FFTPFIX-0000002A.iso 4293918720 0x2A`.
-2. Copy it to `Hdd1\FastFTP-Bench\` and `Usb0\FastFTP-Bench\` with FastFTP's FTP server, and put it in the NetISO server's ISO folder.
-3. Run all six workloads, 30 s each, on **Internal HDD**, **USB 0** and **NetISO protocol**, with Data check on and the Xbox file cache bypassed. Each result should say *known data checked* with 0 errors.
-4. Optionally, run the same game once from the HDD and once over NetISO through the console plugin, and time the loads with a stopwatch. That is the only test of the full game path.
+2. Copy it to `Usb0\FastFTP-Bench\` with FastFTP's FTP server, and put it in the NetISO server's ISO folder.
+3. Run all six workloads, 30 s each, on **USB 0** and **NetISO protocol**, with Data check on and the Xbox file cache bypassed. Each result should say *known data checked* with 0 errors.
+4. Optionally, load a game over NetISO through the console plugin and time the load with a stopwatch. That is the only test of the full game path.
 
 Every run is added to `FastFTP-reads.csv` next to `FastFTP.xex`. Add the new rows to `docs/results/`.
 

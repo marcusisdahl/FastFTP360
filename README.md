@@ -30,6 +30,7 @@ FastFTP is experimental homebrew. Read [Safety](#safety) before using it on file
 - [Network test](#network-test)
 - [Disk test](#disk-test)
 - [Read test](#read-test)
+  - [Results: NetISO versus disc](#results-netiso-versus-disc)
 - [Settings](#settings)
 - [Why it is faster](#why-it-is-faster)
 - [Safety](#safety)
@@ -160,7 +161,30 @@ Pick the source, press **X** to list files (or **Y** first to set the NetISO ser
 
 FastFTP never loads, unloads or configures NetISO or ConnectX. Reading through a mounted NetISO disc is not implemented, because the plugin's device name could not be verified. The reference server `netiso-srv` can cut 256 KiB and 1 MiB replies short; `tests/netiso_server.py` is a fixed test server.
 
-First results, comparing NetISO over the built-in port and the UE306 with disc, internal HDD and USB: [docs/READ-RESULTS.md](docs/READ-RESULTS.md). Over the UE306, sequential reads reached 27.1 MiB/s, and a random 64 KiB read took 2.8 ms.
+### Results: NetISO versus disc
+
+These are the first runs on one console. FastFTP read a game ISO with the NetISO protocol from a wired PC, 30 s per run, and all runs finished with 0 errors. The disc figures are published values, not measured here, because the test console's DVD drive is broken.
+
+| Read | Game disc (12x DVD) | NetISO, built-in 100 Mbit port | NetISO, UE306 + CUsbEnet |
+|---|---|---|---|
+| Sequential 1 MiB | 6.6–15.7 MiB/s, about 11 on average | 11.23 MiB/s | **27.10 MiB/s** |
+| Random 64 KiB | about 0.3–0.4 MiB/s (150–200 ms per read) | 10.41 MiB/s (6.0 ms) | **22.21 MiB/s (2.8 ms)** |
+| Random 16 KiB | about 0.1 MiB/s | 8.91 MiB/s (1.8 ms) | **13.28 MiB/s (1.2 ms)** |
+| Random 4 KiB | about 0.02 MiB/s | **6.77 MiB/s (0.58 ms)** | 5.80 MiB/s (0.67 ms) |
+
+```mermaid
+xychart-beta
+    title "Sequential reads (MiB/s)"
+    x-axis ["Disc inner", "Disc average", "Disc outer", "NetISO built-in", "NetISO UE306"]
+    y-axis "MiB/s" 0 --> 30
+    bar [6.6, 11, 15.7, 11.23, 27.10]
+```
+
+- **Large reads:** over the UE306, NetISO reads about 1.7 times faster than a disc at its best. The built-in port is about as fast as a disc on average.
+- **Small scattered reads:** any network path is far faster than a disc, because there is no seek. At 4 KiB the built-in port is slightly ahead, because each request through USB costs about 0.3 ms more.
+- **Game load times:** these will improve much less than the read speeds suggest, because a large part of loading is the console unpacking data. This is inferred from published disc-versus-install load times. Load times through the NetISO plugin have not been measured yet.
+
+The full tables, sources and raw data are in [docs/READ-RESULTS.md](docs/READ-RESULTS.md).
 
 Details, recovery, and what each number means: [docs/READ-BENCHMARKS.md](docs/READ-BENCHMARKS.md). Before trusting it on your console: [docs/CONSOLE-TEST-CHECKLIST.md](docs/CONSOLE-TEST-CHECKLIST.md).
 
