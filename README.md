@@ -145,6 +145,8 @@ USB storage and a USB Ethernet adapter share the Xbox's USB bandwidth. So FTP to
 
 > **Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Version 0.5.0 has been built and host-tested, not run on a console. Keep your working FastFTP and test this one from its own folder.
 
+<p align="center"><img src="docs/images/screen-readnet.png" alt="Read test tab with a NetISO protocol result" width="640"></p>
+
 The **Read test** tab reads an existing file and reports MiB/s, reads per second, and read latency (mean, median, p95, p99, maximum), plus failed, short and timed-out reads. It never writes.
 
 | Source | What it reads |
