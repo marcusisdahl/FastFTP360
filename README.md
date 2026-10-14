@@ -16,6 +16,7 @@ FastFTP moves files between your PC and the Xbox's internal drive or USB storage
 - **Your own login:** `xboxftp` / `xboxftp` by default. Change it with the Xbox keyboard or in `FastFTP.ini`.
 - **Last 5 transfers** on screen with file name, size and speed. Everything is also written to `FastFTP.log`.
 - **Network test and disk test** built in, to find out whether the network, the drive or the FTP client is the slow part.
+- **Read test** (0.5.0, experimental): read throughput and latency from the internal drive, USB, a NetISO server or ConnectX, to see whether playing games from a LAN server is practical.
 
 **Best with [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet).** FastFTP was made alongside CUsbEnet 1.1, a USB Ethernet driver plugin for the Xbox 360. Together they're the fastest way we know of to copy files to an Xbox 360 over FTP. All the speeds on this page were measured with a TP-Link UE306 adapter on CUsbEnet. FastFTP also works over the console's built-in network port.
 
@@ -28,6 +29,7 @@ FastFTP is experimental homebrew. Read [Safety](#safety) before using it on file
 - [FTP server](#ftp-server)
 - [Network test](#network-test)
 - [Disk test](#disk-test)
+- [Read test](#read-test)
 - [Settings](#settings)
 - [Why it is faster](#why-it-is-faster)
 - [Safety](#safety)
@@ -139,6 +141,24 @@ The test writes a **256 MiB** file named `FASTFTP-DISKTEST.TMP`, including the f
 
 USB storage and a USB Ethernet adapter share the Xbox's USB bandwidth. So FTP to a USB drive is much slower than FTP to the internal drive, even though both disks are fast on their own.
 
+## Read test
+
+> **Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Version 0.5.0 has been built and host-tested, not run on a console. Keep your working FastFTP and test this one from its own folder.
+
+The **Read test** tab reads an existing file and reports MiB/s, reads per second, and read latency (mean, median, p95, p99, maximum), plus failed, short and timed-out reads. It never writes.
+
+| Source | What it reads |
+|---|---|
+| Internal HDD, USB 0, USB 1, App drive | A file in `FastFTP-Bench` on that drive |
+| NetISO protocol | An ISO straight from a NetISO server on port 4323. FastFTP talks to the server itself, **bypassing the console's NetISO plugin**, so this is not a full gameplay-path test. |
+| ConnectX | A file through the ConnectX module, only if it is **already loaded** and you set its folder in `FastFTP.ini` |
+
+Pick the source, press **X** to list files (or **Y** first to set the NetISO server), choose the file, the workload (sequential 64 KiB / 256 KiB / 1 MiB or random 4 / 16 / 64 KiB) and the duration (30 s default), then press **A**. A 3-second warm-up is never measured. Files named `FFTPFIX-<seed>.*` are known-data fixtures, and every byte read from them is checked. Results go to `FastFTP.log` and `FastFTP-reads.csv` next to the XEX.
+
+FastFTP never loads, unloads or configures NetISO or ConnectX. Reading through a mounted NetISO disc is not implemented, because the plugin's device name could not be verified. The reference server `netiso-srv` can cut 256 KiB and 1 MiB replies short; `tests/netiso_server.py` is a fixed test server.
+
+Details, recovery, and what each number means: [docs/READ-BENCHMARKS.md](docs/READ-BENCHMARKS.md). Before trusting it on your console: [docs/CONSOLE-TEST-CHECKLIST.md](docs/CONSOLE-TEST-CHECKLIST.md).
+
 ## Settings
 
 The **Settings** tab holds options most people never need. While stopped, **D-pad Up/Down** picks one and **Left/Right** changes it. The left card explains the selected option.
@@ -173,7 +193,7 @@ At this point the Xbox's USB 2 controller is the limit, not the disk or the FTP 
 
 - **Nothing is encrypted**, including the login. Use FastFTP only on a trusted home network, never port-forward it to the internet, and stop it with **B** when you are done.
 - Anyone who logs in can overwrite and delete files on every listed drive, including the system partitions. Keep backups of anything important.
-- FastFTP is an app you start yourself. It does not install itself, change `launch.ini`, patch the kernel, write NAND, or change your network driver. It writes only the files your FTP client sends, its own `FastFTP.ini` and `FastFTP.log`, and the disk test's temporary file.
+- FastFTP is an app you start yourself. It does not install itself, change `launch.ini`, patch the kernel, write NAND, or change your network driver. It writes only the files your FTP client sends, its own `FastFTP.ini`, `FastFTP.log` and `FastFTP-reads.csv`, and the disk test's temporary file. The read test only reads.
 - Homebrew can still crash or hang the console. Keep a known-good driver and your usual recovery method.
 
 The host tests run the same FTP server code on Windows with Python's `ftplib`. They cover file operations, exact byte counts, path handling, the login, `FastFTP.ini`, the log, and simultaneous sessions. They are not a substitute for testing on a console. See the [changelog](CHANGELOG.md) for what has and hasn't been tested on hardware, and the [crash investigation](docs/CRASH-INVESTIGATION.md) for an earlier console freeze during network tests.

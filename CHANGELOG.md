@@ -1,5 +1,20 @@
 # Changes
 
+## 0.5.0 (experimental)
+
+**Experimental; ABadAvatar 1.3 / ABadUpdate compatibility not yet verified.** Built and host-tested only.
+
+- New **Read test** tab for judging NetISO and ConnectX game loading: sources Internal HDD, USB 0, USB 1, App drive, **NetISO protocol** and **ConnectX**; workloads sequential 64 KiB / 256 KiB / 1 MiB and random 4 / 16 / 64 KiB (4 KiB aligned, seeded); 10/30/60/120 s after a 3 s warm-up. Reports MiB/s, reads/s, latency mean/p50/p95/p99/max (percentiles approximate to ~3%), failed, short, timed-out reads and integrity failures, first pass versus repeats. Read only.
+- **NetISO protocol** client written from tuxuser/netiso-srv's source: exact sends and receives, 10 s idle timeout, B cancels within 100 ms, ambiguous ISO names refused. It bypasses the console's NetISO plugin.
+- **ConnectX** is used only if `connectx.xex` is already loaded and `connectx_folder=` is set; otherwise only that source is off.
+- Mounted NetISO disc reads are not implemented: the plugin's device name could not be verified.
+- Known-data fixtures (`FFTPFIX-<seed>.*`) are checked byte by byte; other files only by byte count.
+- Results in `FastFTP.log` and the new `FastFTP-reads.csv`; read settings in `FastFTP.ini` (`read_folder`, `connectx_folder`, `netiso_server`, `netiso_port`, `read_seed`). The FTP login lines are unchanged.
+- Drawing pauses during reads, as during other transfers.
+- Host tests: `tests/read.py` (56 checks) with `tests/netiso_server.py`, a NetISO test server with fault injection; `tests/posix_compat.h` builds the engine on Linux. Found and documented `netiso-srv` defects: unbuffered `try_write` cuts large replies, single-`read` request parsing, suffix-match mounting.
+- Network test protocol unchanged (v3); `FastFTP-PC.exe` only shows the new version.
+
+
 ## 0.4.1
 
 The first published release of the 0.4 work. The 0.4.0 tag pointed at an earlier commit, from before the rename to FastFTP and the new README, so 0.4.1 replaces it. Apart from the version number, the code is the same as the 0.4.0 files.
