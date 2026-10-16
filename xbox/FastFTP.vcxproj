@@ -18,7 +18,7 @@
       <ProgramDataBaseFileName>$(IntDir)compiler.pdb</ProgramDataBaseFileName><FunctionLevelLinking>true</FunctionLevelLinking><StringPooling>true</StringPooling>
     </ClCompile>
     <Link><OutputFile>$(OutDir)FastFTP.exe</OutputFile><GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)FastFTP.pdb</ProgramDatabaseFile><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <ProgramDatabaseFile>$(OutDir)FastFTP.pdb</ProgramDatabaseFile><AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalDependencies>xapilib.lib;xboxkrnl.lib;xnet.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xmcore.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ImageXex><ConfigurationFile>$(ProjectDir)FastFTP.xml</ConfigurationFile></ImageXex>
