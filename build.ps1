@@ -9,11 +9,11 @@ try {
     $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     if (!(Test-Path -LiteralPath $csc)) { throw '.NET Framework compiler not found.' }
     New-Item -ItemType Directory -Force build\windows,build\host,build\host\lan,build\host\ftp,build\host\ui | Out-Null
-    & $csc /nologo /optimize+ /target:winexe /out:build\windows\FastFTP-PC.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Core.dll windows\Engine.cs windows\Program.cs
+    & $csc /nologo /optimize+ /target:winexe /out:build\windows\FastFTP360-PC.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Core.dll windows\Engine.cs windows\Program.cs
     if ($LASTEXITCODE) { throw 'Windows compilation failed.' }
     if (!$HostOnly) {
         $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
-        & $msbuild xbox\FastFTP.vcxproj /t:Build /p:Configuration=Release '/p:Platform=Xbox 360' /v:normal /nologo
+        & $msbuild xbox\FastFTP360.vcxproj /t:Build /p:Configuration=Release '/p:Platform=Xbox 360' /v:normal /nologo
         if ($LASTEXITCODE) { throw 'Xbox compilation failed. Check the SDK and RXDK integration.' }
     }
     if ($Tests) {

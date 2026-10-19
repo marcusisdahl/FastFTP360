@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|Xbox 360"><Configuration>Release</Configuration><Platform>Xbox 360</Platform></ProjectConfiguration></ItemGroup>
-  <PropertyGroup Label="Globals"><ProjectGuid>{33C84A5A-1065-42B4-934D-3360BE360001}</ProjectGuid><Keyword>Xbox360Proj</Keyword><ProjectName>FastFTP</ProjectName></PropertyGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{33C84A5A-1065-42B4-934D-3360BE360001}</ProjectGuid><Keyword>Xbox360Proj</Keyword><ProjectName>FastFTP360</ProjectName></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><CharacterSet>MultiByte</CharacterSet><PlatformToolset>2010-01</PlatformToolset></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
     <OutDir>$(ProjectDir)..\build\xbox\</OutDir><IntDir>$(OutDir)obj\</IntDir>
-    <TargetName>FastFTP</TargetName><TargetExt>.exe</TargetExt>
-    <TargetPath>$(OutDir)FastFTP.exe</TargetPath><OutputFile>$(OutDir)FastFTP.exe</OutputFile>
-    <ImageXexOutput>$(OutDir)FastFTP.xex</ImageXexOutput>
+    <TargetName>FastFTP360</TargetName><TargetExt>.exe</TargetExt>
+    <TargetPath>$(OutDir)FastFTP360.exe</TargetPath><OutputFile>$(OutDir)FastFTP360.exe</OutputFile>
+    <ImageXexOutput>$(OutDir)FastFTP360.xex</ImageXexOutput>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile><Optimization>Full</Optimization><FavorSizeOrSpeed>Speed</FavorSizeOrSpeed><WarningLevel>Level4</WarningLevel>
@@ -17,15 +17,15 @@
       <PreprocessorDefinitions>NDEBUG;_XBOX;DEVKIT_ONLY=0;IMGUI_USE_BGRA_PACKED_COLOR;IMGUI_DISABLE_FILE_FUNCTIONS;IMGUI_DISABLE_WIN32_FUNCTIONS;IMGUI_DISABLE_DEMO_WINDOWS;IMGUI_DISABLE_METRICS_WINDOW;%(PreprocessorDefinitions)</PreprocessorDefinitions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ProgramDataBaseFileName>$(IntDir)compiler.pdb</ProgramDataBaseFileName><FunctionLevelLinking>true</FunctionLevelLinking><StringPooling>true</StringPooling>
     </ClCompile>
-    <Link><OutputFile>$(OutDir)FastFTP.exe</OutputFile><GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)FastFTP.pdb</ProgramDatabaseFile><AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding>
+    <Link><OutputFile>$(OutDir)FastFTP360.exe</OutputFile><GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)FastFTP360.pdb</ProgramDatabaseFile><AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalDependencies>xapilib.lib;xboxkrnl.lib;xnet.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xmcore.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <ImageXex><ConfigurationFile>$(ProjectDir)FastFTP.xml</ConfigurationFile></ImageXex>
+    <ImageXex><ConfigurationFile>$(ProjectDir)FastFTP360.xml</ConfigurationFile></ImageXex>
     <Deploy><ExcludedFromBuild>true</ExcludedFromBuild></Deploy>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\shared\bench.cpp" /><ClCompile Include="..\shared\ui.cpp" /><ClCompile Include="..\shared\ftp.cpp" /><ClCompile Include="imgui_impl_xbox360.cpp" />
     <ClCompile Include="..\third_party\imgui\imgui.cpp"><WarningLevel>Level3</WarningLevel></ClCompile><ClCompile Include="..\third_party\imgui\imgui_draw.cpp"><WarningLevel>Level3</WarningLevel></ClCompile><ClCompile Include="..\third_party\imgui\imgui_widgets.cpp"><WarningLevel>Level3</WarningLevel></ClCompile><ClCompile Include="..\third_party\imgui\imgui_tables.cpp"><WarningLevel>Level3</WarningLevel></ClCompile></ItemGroup>
-  <ItemGroup><ClInclude Include="..\shared\bench.h" /><ClInclude Include="..\shared\ui.h" /><ClInclude Include="..\shared\ftp.h" /><ClInclude Include="imgui_impl_xbox360.h" /><ClInclude Include="..\third_party\imgui\imgui.h" /><None Include="FastFTP.xml" /></ItemGroup>
+  <ItemGroup><ClInclude Include="..\shared\bench.h" /><ClInclude Include="..\shared\ui.h" /><ClInclude Include="..\shared\ftp.h" /><ClInclude Include="imgui_impl_xbox360.h" /><ClInclude Include="..\third_party\imgui\imgui.h" /><None Include="FastFTP360.xml" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

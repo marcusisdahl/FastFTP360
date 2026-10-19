@@ -118,11 +118,11 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
             if(s.streams>1) _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  %.1f s  /  %.1f MiB  /  %d streams",way,s.elapsed,s.mebibytes,s.streams);
             else _snprintf_s(text,sizeof(text),_TRUNCATE,"%s  /  %.1f s  /  %.1f MiB",way,s.elapsed,s.mebibytes);
         } else if(s.armed) {
-            lines[0]="Listening. In FastFTP-PC.exe on the same network,";
+            lines[0]="Listening. In FastFTP360-PC.exe on the same network,";
             lines[1]="enter the Xbox IP shown above and start the test.";
         } else {
             lines[0]="1   Press A to listen.";
-            lines[1]="2   Open FastFTP-PC.exe and enter the Xbox IP.";
+            lines[1]="2   Open FastFTP360-PC.exe and enter the Xbox IP.";
             lines[2]="3   Start the test on the PC.";
         }
     }
@@ -179,7 +179,7 @@ static void Settings(const UiState& s,float x,float y,float w,float h) {
 static void PcApp(const UiState& s,float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+24,Hex(Muted),"ON THE PC");
-    Text(Body,x+28,y+62,Hex(White),"FastFTP-PC.exe");
+    Text(Body,x+28,y+62,Hex(White),"FastFTP360-PC.exe");
     Text(Small,x+28,y+104,Hex(Muted),"Xbox IP to enter");
     Text(Heading,x+28,y+130,Hex(White),s.ip);
     Text(Small,x+28,y+h-46,Hex(Dim),"Tuning is on the Settings tab.");
@@ -188,9 +188,9 @@ static void PcApp(const UiState& s,float x,float y,float w,float h) {
 static void Files(float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+18,Hex(Muted),"FILES NEXT TO THE XEX");
-    Text(Body,x+28,y+52,Hex(White),"FastFTP.ini");
+    Text(Body,x+28,y+52,Hex(White),"FastFTP360.ini");
     Text(Body,x+200,y+52,Hex(Muted),"FTP login");
-    Text(Body,x+460,y+52,Hex(White),"FastFTP.log");
+    Text(Body,x+460,y+52,Hex(White),"FastFTP360.log");
     Text(Body,x+640,y+52,Hex(Muted),"FTP activity");
 }
 
@@ -255,15 +255,15 @@ static void Footer(const UiState& s,float y) {
 void DrawUi(const UiState& s) {
     ImGui::NewFrame();
     ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImVec2(1280,720));
-    ImGui::Begin("FastFTP",NULL,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoSavedSettings);
+    ImGui::Begin("FastFTP360",NULL,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoSavedSettings);
     List=ImGui::GetWindowDrawList();
     List->AddRectFilled(ImVec2(0,0),ImVec2(1280,720),Hex(Background));
     char text[128];
 
     // Header: name and version, then the address to type into the PC app.
     Box(Left,Top+6,6,40,Hex(Green),3);
-    Text(Heading,Left+20,Top,Hex(White),"FastFTP");
-    Text(Small,Left+20+Width(Heading,"FastFTP")+16,Top+14,Hex(Muted),"FTP server with network and disk tests  v0.4.1");
+    Text(Heading,Left+20,Top,Hex(White),"FastFTP360");
+    Text(Small,Left+20+Width(Heading,"FastFTP360")+16,Top+14,Hex(Muted),"FTP server with network and disk tests  v0.4.1");
     bool online=strchr(s.ip,'.')!=NULL;
     TextRight(Heading,Right,Top,Hex(online ? White : Muted),s.ip);
     // The port only matters on the tabs that listen for the PC.

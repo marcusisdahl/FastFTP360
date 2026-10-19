@@ -5,7 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 
-namespace FastFTP {
+namespace FastFTP360 {
     public sealed class TestResult {
         public string Driver, Address, Utc;
         public int Direction, Run, RequestedSeconds, RequestedBuffer, PcSendBuffer, PcRecvBuffer, XboxSendBuffer, XboxRecvBuffer, Streams=1;

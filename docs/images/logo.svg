@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 256" width="880" height="256">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1004 256" width="1004" height="256">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#1D2D45"/>
@@ -13,6 +13,6 @@
   </g>
   <rect x="30" y="126" width="34" height="11" rx="5.5" fill="#3ED9BC" opacity="0.6"/>
   <rect x="44" y="148" width="22" height="11" rx="5.5" fill="#3ED9BC" opacity="0.35"/>
-  <text x="290" y="150" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="112" font-weight="800" fill="#3ED9BC" font-style="italic">Fast<tspan fill="#73B8FF">FTP</tspan></text>
+  <text id="name" x="290" y="150" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="112" font-weight="800" fill="#3ED9BC" font-style="italic">Fast<tspan fill="#73B8FF">FTP</tspan><tspan fill="#8FA6BA">360</tspan></text>
   <text x="294" y="206" font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#8FA6BA">for homebrew Xbox 360</text>
 </svg>

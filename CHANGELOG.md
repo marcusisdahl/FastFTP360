@@ -1,5 +1,9 @@
 # Changes
 
+## Unreleased
+
+- Renamed to **FastFTP360**, since "FastFTP" is also the name of other FTP tools: `FastFTP360.xex`, `FastFTP360-PC.exe`, `FastFTP360.sln`, the screen header, the FTP greeting, the logo, `FastFTP360.ini`, `FastFTP360.log` and the disk test's `FASTFTP360-DISKTEST.TMP`. A login saved in the old `FastFTP.ini` is still read when `FastFTP360.ini` doesn't exist yet, and the next login change saves it under the new name. Old `FastFTP.log` files are left alone.
+
 ## 0.4.1
 
 The first published release of the 0.4 work. The 0.4.0 tag pointed at an earlier commit, from before the rename to FastFTP and the new README, so 0.4.1 replaces it. Apart from the version number, the code is the same as the 0.4.0 files.

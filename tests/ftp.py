@@ -190,7 +190,7 @@ with tempfile.TemporaryDirectory() as temp:
               len(log) == len(expected) and all(line.startswith("127.0.0.1  " + text) for line, text in zip(log, expected)))
 
     def login_file(text):
-        path = Path(temp) / "FastFTP.ini"
+        path = Path(temp) / "FastFTP360.ini"
         path.write_bytes(text.encode("latin-1"))
         out = subprocess.run([str(ROOT / "build/host/ftp-host.exe"), "--login-file", str(path)],
                              capture_output=True, text=True, timeout=10).stdout.split()

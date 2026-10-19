@@ -29,10 +29,12 @@ static int CpuChoice=0;
 static bool DrawDuringTransfers=false;
 // FTP login. Required by default; switching it off lets any user name in.
 // The user can change both with the on-screen keyboard (Y on the FTP tab);
-// they are kept in FastFTP.ini next to the XEX.
+// they are kept in FastFTP360.ini next to the XEX.
 static bool FtpLoginRequired=true;
 static char FtpUser[nb::FtpLoginMax+1]="xboxftp",FtpPassword[nb::FtpLoginMax+1]="xboxftp";
-static const char LoginFile[]="game:\\FastFTP.ini";
+static const char LoginFile[]="game:\\FastFTP360.ini";
+// Read when FastFTP360.ini is missing, so a login saved before the rename carries over.
+static const char OldLoginFile[]="game:\\FastFTP.ini";
 // On-screen keyboard: 0 closed, 1 asking for the user name, 2 for the password.
 static int KeyboardStep=0;
 static DWORD KeyboardPad=0;
@@ -89,8 +91,8 @@ static int CompareRoots(const void* a,const void* b) {
 }
 
 // FTP log, next to the XEX. Every line starts with the local date and time.
-// A log over 1 MiB is moved to FastFTP.old.log when the server starts.
-static const char LogFile[]="game:\\FastFTP.log",OldLogFile[]="game:\\FastFTP.old.log";
+// A log over 1 MiB is moved to FastFTP360.old.log when the server starts.
+static const char LogFile[]="game:\\FastFTP360.log",OldLogFile[]="game:\\FastFTP360.old.log";
 static CRITICAL_SECTION LogLock;
 static void WriteLog(const char* text) {
     SYSTEMTIME now; GetLocalTime(&now);
@@ -118,6 +120,7 @@ static void RotateLog() {
 
 static void LoadLogin() {
     HANDLE file=CreateFile(LoginFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file==INVALID_HANDLE_VALUE) file=CreateFile(OldLoginFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) return;
     char text[512]; DWORD read=0;
     if(ReadFile(file,text,sizeof(text)-1,&read,NULL)) { text[read]=0; nb::ParseFtpLogin(text,FtpLoginRequired,FtpUser,FtpPassword); }
@@ -280,11 +283,11 @@ static DWORD WINAPI DiskThread(void*) {
     const DiskTarget& target=DiskTargets[DiskChoice];
     const DWORD block=DiskBlocks[DiskBlockChoice];
     bool linked=false;
-    const char* path="game:\\FASTFTP-DISKTEST.TMP";
+    const char* path="game:\\FASTFTP360-DISKTEST.TMP";
     if(target.device) {
         LONG status=LinkDrive("\\??\\NBDISK:",target.device);
         if(status<0) { DiskFailure("%s not found or not mountable (0x%08X).",target.name,DWORD(status)); return 0; }
-        linked=true; path="NBDISK:\\FASTFTP-DISKTEST.TMP";
+        linked=true; path="NBDISK:\\FASTFTP360-DISKTEST.TMP";
     }
     unsigned char* buffer=static_cast<unsigned char*>(VirtualAlloc(NULL,block,MEM_COMMIT,PAGE_READWRITE));
     unsigned char* check=static_cast<unsigned char*>(VirtualAlloc(NULL,block,MEM_COMMIT,PAGE_READWRITE));
@@ -497,7 +500,7 @@ static void PollKeyboard() {
     strcpy_s(FtpUser,PendingUser); strcpy_s(FtpPassword,text); FtpLoginRequired=true; DescribeSettings();
     LeaveCriticalSection(&StateLock);
     char line[80]; _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP login changed on the Xbox (user %s)",PendingUser); WriteLog(line);
-    LoginMessage(SaveLogin() ? "Login changed and saved in FastFTP.ini." : "Login changed, but FastFTP.ini could not be saved.");
+    LoginMessage(SaveLogin() ? "Login changed and saved in FastFTP360.ini." : "Login changed, but FastFTP360.ini could not be saved.");
 }
 
 static bool InitGraphics() {
