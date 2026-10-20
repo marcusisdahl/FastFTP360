@@ -366,7 +366,7 @@ static void FtpProgress(void*,const char* operation,const char* file,nb::U64 byt
         // Newest first in the last-transfers list.
         memmove(&State.recent[1],&State.recent[0],sizeof(State.recent[0])*(nb::UiRecentTransfers-1));
         nb::UiTransfer& entry=State.recent[0];
-        strcpy_s(entry.name,sizeof(entry.name),file); entry.mebibytes=mib; entry.rate=rate; entry.upload=operation[0]=='S'; entry.ok=ok;
+        strncpy_s(entry.name,sizeof(entry.name),file,_TRUNCATE); entry.mebibytes=mib; entry.rate=rate; entry.upload=operation[0]=='S'; entry.ok=ok;
         if(State.recentCount<nb::UiRecentTransfers) ++State.recentCount;
     } else {
         State.ftpPhase=operation[0]=='S' ? 2 : 3; State.mebibytes=mib; State.elapsed=seconds; State.rate=rate;

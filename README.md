@@ -114,7 +114,10 @@ Wrong logins, downloads, deletes, renames, new folders and disconnects are logge
 - Up to **four** client connections at once. One is usually enough. More connections don't add speed, because the connection itself is the limit.
 - Control port **21**. Passive data ports **36100 to 36199**.
 - **Not supported:** active mode (`PORT`/`EPRT`), FTPS/TLS, SFTP, and resuming a partial transfer. Restart an interrupted upload from the beginning.
-- Uploading to an existing name replaces the file. A failed upload is deleted, so an interrupted overwrite does not keep the old file.
+- Uploading to an existing name replaces the file once the upload has finished. Until then the data goes to a temporary `FastFTP360-<number>.tmp` file in the same folder, so a failed or cancelled upload leaves the old file as it was. Replacing a file needs free space for both copies for a moment.
+- Cancelling in the FTP client stops the transfer straight away, whether the client sends `ABOR` or closes the connection. An unfinished upload is deleted.
+- Names of up to 255 characters and paths of up to 259 are accepted; longer ones get an error. The Xbox's own drives (FATX) allow at most 42 characters per name.
+- Data connections are accepted only from the computer that is logged in.
 - Each finished transfer's `226` reply in the FTP client log shows bytes, seconds and MiB/s.
 
 ## Network test
