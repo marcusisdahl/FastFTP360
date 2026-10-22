@@ -21,9 +21,14 @@ static IDirect3DDevice9* Device=NULL;
 // Zero keeps the 64 KiB XNet startup default.
 static const int BufferChoices[]={0,131072,262144};
 static int BufferChoice=0;
-// Hardware thread for stream workers: 0 lets the kernel choose, otherwise 1-6
-// selects hardware thread 0-5. USB completion DPCs run on hardware thread 2.
+// Hardware thread for network test streams and FTP sessions: 0 lets the kernel
+// choose, otherwise 1-6 selects hardware thread 0-5. USB completion DPCs run on
+// hardware thread 2.
 static int CpuChoice=0;
+// FTP speed limit for all transfers together in MiB/s; 0 is no limit. One
+// console with a stock 20 GB drive froze at 20+ MiB/s but not at 14.
+static const int SpeedChoices[]={0,12,16,20};
+static int SpeedChoice=0;
 // Whether to keep drawing while data moves. Off by default: drawing during
 // Xbox sends has preceded console crashes, so the screen is held instead.
 static bool DrawDuringTransfers=false;
@@ -156,6 +161,8 @@ static void DescribeSettings() {
     if(BufferChoices[BufferChoice]) _snprintf_s(State.buffers,sizeof(State.buffers),_TRUNCATE,"%d KiB",BufferChoices[BufferChoice]/1024);
     else strcpy_s(State.buffers,"Startup default (64 KiB)");
     if(CpuChoice) _snprintf_s(State.cpu,sizeof(State.cpu),_TRUNCATE,"Hardware thread %d",CpuChoice-1); else strcpy_s(State.cpu,"Automatic");
+    if(SpeedChoices[SpeedChoice]) _snprintf_s(State.speed,sizeof(State.speed),_TRUNCATE,"%d MiB/s",SpeedChoices[SpeedChoice]);
+    else strcpy_s(State.speed,"Off");
     strcpy_s(State.diskTarget,DiskTargets[DiskChoice].name);
     if(DiskBlocks[DiskBlockChoice]>=1048576) _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u MiB",DiskBlocks[DiskBlockChoice]/1048576);
     else _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u KiB",DiskBlocks[DiskBlockChoice]/1024);
@@ -165,7 +172,7 @@ static void DescribeSettings() {
 // Steps the focused setting on the current tab by one choice (D-pad left/right).
 static void ChangeSetting(int tab,int row,int step) {
     const int buffers=sizeof(BufferChoices)/sizeof(BufferChoices[0]),targets=sizeof(DiskTargets)/sizeof(DiskTargets[0]),
-        blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]);
+        blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]),speeds=sizeof(SpeedChoices)/sizeof(SpeedChoices[0]);
     if(tab==nb::TabFtp) { FtpLoginRequired=!FtpLoginRequired; SaveLogin(); }
     else if(tab==nb::TabDisk) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
@@ -174,7 +181,8 @@ static void ChangeSetting(int tab,int row,int step) {
     else if(tab==nb::TabSettings) {
         if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
         else if(row==1) CpuChoice=(CpuChoice+7+step)%7;
-        else DrawDuringTransfers=!DrawDuringTransfers;
+        else if(row==2) DrawDuringTransfers=!DrawDuringTransfers;
+        else SpeedChoice=(SpeedChoice+speeds+step)%speeds;
     }
 }
 static bool IsCancelled(void*) { return InterlockedCompareExchange(&Cancel,0,0)!=0; }
@@ -355,12 +363,27 @@ static DWORD WINAPI DiskThread(void*) {
     LeaveCriticalSection(&StateLock);
     return 0;
 }
+// A transfer's data connection is open. Unless drawing stays live, wait until
+// the main thread has drawn its last frame and the GPU is idle, as the network
+// test does, so no data moves while the GPU is still busy.
+static void FtpStarting(void*,const char* operation,const char*) {
+    const bool pause=!DrawDuringTransfers && GraphicsIdle;
+    if(pause) ResetEvent(GraphicsIdle);
+    EnterCriticalSection(&StateLock);
+    ++State.ftpActive; State.ftpPhase=operation[0]=='S' ? 2 : 3; State.mebibytes=0; State.elapsed=0; State.rate=0;
+    LeaveCriticalSection(&StateLock);
+    if(!pause) return;
+    const double deadline=nb::Now()+5;
+    while(!IsCancelled(NULL) && nb::Now()<deadline && WaitForSingleObject(GraphicsIdle,100)!=WAIT_OBJECT_0) {}
+}
 static void FtpProgress(void*,const char* operation,const char* file,nb::U64 bytes,double seconds,bool done,bool ok) {
     EnterCriticalSection(&StateLock);
     double mib=double(bytes)/1048576,rate=seconds>0 ? mib/seconds : 0;
     const char* kind=operation[0]=='S' ? "Upload" : "Download";
     if(done) {
-        State.ftpPhase=1;
+        // Another session's transfer may still be running; drawing stays paused until none is.
+        if(State.ftpActive>0) --State.ftpActive;
+        if(!State.ftpActive) State.ftpPhase=1;
         if(ok) _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"%s, %.1f MiB in %.1f s: %.2f MiB/s",kind,mib,seconds,rate);
         else _snprintf_s(State.ftp,sizeof(State.ftp),_TRUNCATE,"%s failed after %.1f MiB",kind,mib);
         // Newest first in the last-transfers list.
@@ -411,19 +434,20 @@ static DWORD WINAPI FtpThread(void*) {
         EnterCriticalSection(&StateLock);
         State.ftpPhase=1; State.phase=nb::Idle; State.ftp[0]=0; strcpy_s(State.message,folders);
         LeaveCriticalSection(&StateLock);
-        nb::FtpObserver observer={NULL,IsCancelled,FtpProgress,FtpLog};
-        char line[200];
+        nb::FtpObserver observer={NULL,IsCancelled,FtpProgress,FtpLog,FtpStarting};
+        char line[300];
         const BYTE* ip=reinterpret_cast<const BYTE*>(&xnaddr.ina);
-        _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP server started on %u.%u.%u.%u port 21, login %s. %s",ip[0],ip[1],ip[2],ip[3],FtpLoginRequired ? FtpUser : "off",folders);
+        _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP server started on %u.%u.%u.%u port 21, login %s, speed limit %s, worker CPU %s. %s",
+            ip[0],ip[1],ip[2],ip[3],FtpLoginRequired ? FtpUser : "off",State.speed,State.cpu,folders);
         WriteLog(line);
-        if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],0,
+        if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],SpeedChoices[SpeedChoice],CpuChoice-1,0,
             FtpLoginRequired ? FtpUser : NULL,FtpPassword,observer,error,sizeof(error))) ready=false;
     }
     if(listener!=INVALID_SOCKET) closesocket(listener);
     for(int i=0;i<FtpDriveCount;++i) if(linked[i]) UnlinkDrive(FtpLinks[i]);
     if(!ready && !IsCancelled(NULL)) { char line[160]; _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP server error: %s",error[0] ? error : "unknown"); WriteLog(line); }
     else WriteLog("FTP server stopped");
-    EnterCriticalSection(&StateLock); State.ftpPhase=0; State.armed=0; LeaveCriticalSection(&StateLock);
+    EnterCriticalSection(&StateLock); State.ftpPhase=0; State.ftpActive=0; State.armed=0; LeaveCriticalSection(&StateLock);
     if(!ready && !IsCancelled(NULL)) Failure(error[0] ? error : "FTP server failed.");
     else { EnterCriticalSection(&StateLock); State.phase=nb::Stopped; strcpy_s(State.message,"FTP server stopped."); LeaveCriticalSection(&StateLock); }
     return 0;
@@ -603,11 +627,11 @@ void __cdecl main() {
         const double now=nb::Now(); const float seconds=float(now-lastFrame); lastFrame=now;
         // Hold one static frame while data moves if the PC asked for it, or
         // unless drawing during transfers is switched on.
-        const bool transfer=snapshot.ftpPhase>1 || (snapshot.armed && !snapshot.ftpPhase && snapshot.phase>=nb::Connecting && snapshot.phase<=nb::Measuring);
+        const bool transfer=snapshot.ftpActive>0 || (snapshot.armed && !snapshot.ftpPhase && snapshot.phase>=nb::Connecting && snapshot.phase<=nb::Measuring);
         if(snapshot.armed && ((snapshot.options&nb::PauseDrawing) || (transfer && !DrawDuringTransfers))) {
             if(!renderingPaused) {
                 snapshot.options|=nb::PauseDrawing;
-                strcpy_s(snapshot.message,"Drawing paused during the transfer. B still stops.");
+                strcpy_s(snapshot.message,"Screen paused while data moves. The PC shows progress.");
                 Render(snapshot,seconds); Device->BlockUntilIdle(); renderingPaused=true;
             }
             if(GraphicsIdle) SetEvent(GraphicsIdle);

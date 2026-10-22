@@ -101,12 +101,13 @@ The top level lists the drives the way Aurora's FTP does, sorted by name, so pat
 The FTP tab lists the last five finished transfers with their file name, size and speed, newest first. Every event is also written to `FastFTP360.log` next to the XEX:
 
 ```text
-2026-10-13 18:40:12  FTP server started on 192.168.1.50 port 21, login xboxftp. Folders: Game Hdd1 Usb0
+2026-10-13 18:40:12  FTP server started on 192.168.1.50 port 21, login xboxftp, speed limit Off, worker CPU Automatic. Folders: Game Hdd1 Usb0
 2026-10-13 18:40:31  192.168.1.20  Logged in as xboxftp
+2026-10-13 18:40:33  192.168.1.20  Upload /Hdd1/Games/game.iso started
 2026-10-13 18:44:52  192.168.1.20  Upload /Hdd1/Games/game.iso, 7466336256 bytes in 259.10 s (27.48 MiB/s)
 ```
 
-Wrong logins, downloads, deletes, renames, new folders and disconnects are logged too. When the log grows past 1 MiB, it is moved to `FastFTP360.old.log` the next time the server starts.
+Each transfer is logged when it starts and when it ends, so after a crash the log shows what was running. Wrong logins, downloads, deletes, renames, new folders and disconnects are logged too. When the log grows past 1 MiB, it is moved to `FastFTP360.old.log` the next time the server starts.
 
 ### What the server supports
 
@@ -149,8 +150,9 @@ The **Settings** tab holds options most people never need. While stopped, **D-pa
 | Setting | Choices | Used by |
 |---|---|---|
 | Xbox socket buffers | Startup default (64 KiB), 128 KiB, 256 KiB | FTP and network test. The Xbox may refuse bigger buffers, and bigger is not always faster. |
-| Worker CPU | Automatic, hardware thread 0 to 5 | Network test streams |
-| Drawing during transfers | Paused (default), Live | FTP and network test. Keep **Paused**: live drawing during Xbox sends has crashed the console in testing. |
+| Worker CPU | Automatic, hardware thread 0 to 5 | Network test streams and FTP sessions. USB network work runs on hardware thread 2. |
+| Drawing during transfers | Paused (default), Live | FTP and network test. Keep **Paused**: live drawing during Xbox sends has crashed the console in testing. With Paused, an FTP transfer waits until the screen has stopped drawing before any data moves. |
+| FTP speed limit | Off (default), 12, 16, 20 MiB/s | All FTP uploads and downloads together. Try 12 or 16 if the console freezes during fast transfers: one console with the stock 20 GB drive froze at 20 MiB/s and more, but never at 14. |
 
 ## Why it is faster
 
