@@ -251,7 +251,8 @@ with tempfile.TemporaryDirectory() as temp:
         except ftplib.error_perm as error:
             answered = str(error)
         check("STOR with an over-long name says the name is too long", answered.startswith("553") and "too long" in answered)
-        deep = "c" * 200
+        # Short enough to create under a Windows temp folder; /HDD/<40>/<250> still passes the 259 limit.
+        deep = "c" * 40
         ftp.mkd("/HDD/" + deep)
         ftp.cwd("/HDD/" + deep)
         try:
