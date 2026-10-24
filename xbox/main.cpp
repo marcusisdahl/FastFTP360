@@ -26,7 +26,7 @@ static int BufferChoice=0;
 // hardware thread 2.
 static int CpuChoice=0;
 // FTP speed limit in MiB/s for all transfers together, or only for downloads
-// (the Xbox sending); 0 is no limit. One console with a stock 20 GB drive froze
+// (the Xbox sending); 0 is no limit. One console with a stock 60 GB drive froze
 // at 20+ MiB/s but not at 16, and later only during full-speed downloads.
 // key is the FastFTP360.ini value.
 struct SpeedLimit { int limit; bool downloadsOnly; const char* key; const char* label; };
