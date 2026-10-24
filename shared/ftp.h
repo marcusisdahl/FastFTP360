@@ -30,8 +30,8 @@ bool ServeFtp(SOCKET listener, const FtpRoot* roots, int rootCount, DWORD addres
               int speedLimit, int processor, int maxSessions, const char* user, const char* password,
               const FtpObserver& observer, char* error, size_t capacity);
 
-// FTP login settings, stored as text lines "login=on|off", "user=..." and
-// "password=..." in a settings file next to the XEX.
+// The settings file next to the XEX holds "key=value" lines: the FTP login as
+// "login=on|off", "user=..." and "password=...", and the Xbox app's settings.
 enum { FtpLoginMax = 23 };
 // 1 to FtpLoginMax printable ASCII characters, no spaces.
 bool ValidFtpLogin(const char* text);
@@ -39,4 +39,7 @@ bool ValidFtpLogin(const char* text);
 // current ones. user and password each hold FtpLoginMax+1 characters.
 void ParseFtpLogin(const char* text, bool& required, char* user, char* password);
 void FormatFtpLogin(char* out, size_t capacity, bool required, const char* user, const char* password);
+// Copies the value of the last "key=value" line for key (any case) that fits
+// in capacity; false when there is none.
+bool FindSetting(const char* text, const char* key, char* value, size_t capacity);
 }

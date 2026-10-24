@@ -775,4 +775,16 @@ void ParseFtpLogin(const char* text, bool& required, char* user, char* password)
 void FormatFtpLogin(char* out, size_t capacity, bool required, const char* user, const char* password) {
     _snprintf_s(out,capacity,_TRUNCATE,"login=%s\r\nuser=%s\r\npassword=%s\r\n",required ? "on" : "off",user,password);
 }
+bool FindSetting(const char* text, const char* key, char* value, size_t capacity) {
+    const size_t keyLength=strlen(key); bool found=false;
+    while(*text) {
+        const char* end=text; while(*end && *end!='\n' && *end!='\r') ++end;
+        if(size_t(end-text)>keyLength && text[keyLength]=='=' && !_strnicmp(text,key,keyLength)) {
+            const size_t length=size_t(end-text)-keyLength-1;
+            if(length<capacity) { memcpy(value,text+keyLength+1,length); value[length]=0; found=true; }
+        }
+        text=end; while(*text=='\n' || *text=='\r') ++text;
+    }
+    return found;
+}
 }

@@ -2,6 +2,7 @@
 // Runs the SAME FTP server source on Windows loopback for protocol tests.
 // Usage: ftp-host [--speed <MiB/s>] <port> <folder served as /HDD> <sessions> [user password]
 //        ftp-host --login-file <path>   prints the login the Xbox would read from it
+//        ftp-host --setting <path> <key>   prints that setting's value from the file
 #include "../shared/ftp.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,12 @@ int main(int argc,char** argv) {
         nb::ParseFtpLogin(saved,required2,user2,password2);
         same=required2==required && !strcmp(user2,user) && !strcmp(password2,password);
         printf("LOGIN %s %s %s %s\n",required ? "on" : "off",user,password,same ? "roundtrip" : "mismatch");
+        return 0;
+    }
+    if(argc==4 && !strcmp(argv[1],"--setting")) {
+        char text[512]={0},value[16]; FILE* file=NULL;
+        if(fopen_s(&file,argv[2],"rb")==0) { text[fread(text,1,sizeof(text)-1,file)]=0; fclose(file); }
+        if(nb::FindSetting(text,argv[3],value,sizeof(value))) printf("SETTING [%s]\n",value); else printf("NO SETTING\n");
         return 0;
     }
     int speed=0;

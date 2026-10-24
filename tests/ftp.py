@@ -402,4 +402,19 @@ with tempfile.TemporaryDirectory() as temp:
     check("invalid settings are ignored",
           login_file("user=has space\npassword=\nlogin=maybe\nuser=" + "x" * 24 + "\n") == ["on", "xboxftp", "xboxftp", "roundtrip"])
 
+    def setting(text, key):
+        path = Path(temp) / "FastFTP360.ini"
+        path.write_bytes(text.encode("latin-1"))
+        return subprocess.run([str(HOST), "--setting", str(path), key],
+                              capture_output=True, text=True, timeout=10).stdout.strip()
+
+    saved = "login=on\r\nuser=xboxftp\r\npassword=xboxftp\r\nbuffers=0\r\ncpu=auto\r\ndrawing=paused\r\nspeed=16\r\n"
+    check("the Xbox settings lines are found, the last one wins and keys ignore case",
+          setting(saved, "speed") == "SETTING [16]" and setting(saved, "CPU") == "SETTING [auto]"
+          and setting("speed=12\nspeed=20", "speed") == "SETTING [20]" and setting("speed=", "speed") == "SETTING []")
+    check("other keys, missing keys and values too long for the Xbox are not found",
+          setting("speedy=12\nspeed 16\n", "speed") == "NO SETTING" and setting(saved, "disk") == "NO SETTING"
+          and setting("speed=12\nspeed=" + "1" * 16, "speed") == "SETTING [12]")
+    check("the login is still read from a file with settings lines", login_file(saved) == ["on", "xboxftp", "xboxftp", "roundtrip"])
+
 print("%d FTP checks passed. Console execution remains untested." % passed)

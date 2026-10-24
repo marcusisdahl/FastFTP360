@@ -33,11 +33,11 @@ static int SpeedChoice=0;
 // Xbox sends has preceded console crashes, so the screen is held instead.
 static bool DrawDuringTransfers=false;
 // FTP login. Required by default; switching it off lets any user name in.
-// The user can change both with the on-screen keyboard (Y on the FTP tab);
-// they are kept in FastFTP360.ini next to the XEX.
+// The user can change both with the on-screen keyboard (Y on the FTP tab).
+// The login and the Settings tab are kept in FastFTP360.ini next to the XEX.
 static bool FtpLoginRequired=true;
 static char FtpUser[nb::FtpLoginMax+1]="xboxftp",FtpPassword[nb::FtpLoginMax+1]="xboxftp";
-static const char LoginFile[]="game:\\FastFTP360.ini";
+static const char SettingsFile[]="game:\\FastFTP360.ini";
 // Read when FastFTP360.ini is missing, so a login saved before the rename carries over.
 static const char OldLoginFile[]="game:\\FastFTP.ini";
 // On-screen keyboard: 0 closed, 1 asking for the user name, 2 for the password.
@@ -123,17 +123,42 @@ static void RotateLog() {
     LeaveCriticalSection(&LogLock);
 }
 
-static void LoadLogin() {
-    HANDLE file=CreateFile(LoginFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+// The index of a whole decimal number in choices, or -1.
+static int ChoiceOf(const int* choices,int count,const char* value) {
+    if(!*value) return -1;
+    for(const char* c=value;*c;++c) if(*c<'0' || *c>'9') return -1;
+    for(int i=0;i<count;++i) if(choices[i]==atoi(value)) return i;
+    return -1;
+}
+// Missing or unknown values keep the defaults.
+static void LoadSettings() {
+    HANDLE file=CreateFile(SettingsFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) file=CreateFile(OldLoginFile,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) return;
-    char text[512]; DWORD read=0;
-    if(ReadFile(file,text,sizeof(text)-1,&read,NULL)) { text[read]=0; nb::ParseFtpLogin(text,FtpLoginRequired,FtpUser,FtpPassword); }
+    char text[512],value[16]; DWORD read=0; int choice;
+    if(ReadFile(file,text,sizeof(text)-1,&read,NULL)) {
+        text[read]=0; nb::ParseFtpLogin(text,FtpLoginRequired,FtpUser,FtpPassword);
+        if(nb::FindSetting(text,"buffers",value,sizeof(value))
+            && (choice=ChoiceOf(BufferChoices,sizeof(BufferChoices)/sizeof(BufferChoices[0]),value))>=0) BufferChoice=choice;
+        if(nb::FindSetting(text,"cpu",value,sizeof(value))) {
+            if(!_stricmp(value,"auto")) CpuChoice=0;
+            else if(value[0]>='0' && value[0]<='5' && !value[1]) CpuChoice=value[0]-'0'+1;
+        }
+        if(nb::FindSetting(text,"drawing",value,sizeof(value))) {
+            if(!_stricmp(value,"live")) DrawDuringTransfers=true; else if(!_stricmp(value,"paused")) DrawDuringTransfers=false;
+        }
+        if(nb::FindSetting(text,"speed",value,sizeof(value))
+            && (choice=ChoiceOf(SpeedChoices,sizeof(SpeedChoices)/sizeof(SpeedChoices[0]),value))>=0) SpeedChoice=choice;
+    }
     CloseHandle(file);
 }
-static bool SaveLogin() {
-    char text[160]; nb::FormatFtpLogin(text,sizeof(text),FtpLoginRequired,FtpUser,FtpPassword);
-    HANDLE file=CreateFile(LoginFile,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+static bool SaveSettings() {
+    char text[320],cpu[8]; nb::FormatFtpLogin(text,sizeof(text),FtpLoginRequired,FtpUser,FtpPassword);
+    if(CpuChoice) _snprintf_s(cpu,sizeof(cpu),_TRUNCATE,"%d",CpuChoice-1); else strcpy_s(cpu,"auto");
+    const size_t login=strlen(text);
+    _snprintf_s(text+login,sizeof(text)-login,_TRUNCATE,"buffers=%d\r\ncpu=%s\r\ndrawing=%s\r\nspeed=%d\r\n",
+        BufferChoices[BufferChoice],cpu,DrawDuringTransfers ? "live" : "paused",SpeedChoices[SpeedChoice]);
+    HANDLE file=CreateFile(SettingsFile,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) return false;
     DWORD written=0; bool ok=WriteFile(file,text,DWORD(strlen(text)),&written,NULL) && written==strlen(text);
     CloseHandle(file);
@@ -173,7 +198,7 @@ static void DescribeSettings() {
 static void ChangeSetting(int tab,int row,int step) {
     const int buffers=sizeof(BufferChoices)/sizeof(BufferChoices[0]),targets=sizeof(DiskTargets)/sizeof(DiskTargets[0]),
         blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]),speeds=sizeof(SpeedChoices)/sizeof(SpeedChoices[0]);
-    if(tab==nb::TabFtp) { FtpLoginRequired=!FtpLoginRequired; SaveLogin(); }
+    if(tab==nb::TabFtp) { FtpLoginRequired=!FtpLoginRequired; SaveSettings(); }
     else if(tab==nb::TabDisk) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
     }
@@ -183,6 +208,7 @@ static void ChangeSetting(int tab,int row,int step) {
         else if(row==1) CpuChoice=(CpuChoice+7+step)%7;
         else if(row==2) DrawDuringTransfers=!DrawDuringTransfers;
         else SpeedChoice=(SpeedChoice+speeds+step)%speeds;
+        SaveSettings();
     }
 }
 static bool IsCancelled(void*) { return InterlockedCompareExchange(&Cancel,0,0)!=0; }
@@ -524,7 +550,7 @@ static void PollKeyboard() {
     strcpy_s(FtpUser,PendingUser); strcpy_s(FtpPassword,text); FtpLoginRequired=true; DescribeSettings();
     LeaveCriticalSection(&StateLock);
     char line[80]; _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP login changed on the Xbox (user %s)",PendingUser); WriteLog(line);
-    LoginMessage(SaveLogin() ? "Login changed and saved in FastFTP360.ini." : "Login changed, but FastFTP360.ini could not be saved.");
+    LoginMessage(SaveSettings() ? "Login changed and saved in FastFTP360.ini." : "Login changed, but FastFTP360.ini could not be saved.");
 }
 
 static bool InitGraphics() {
@@ -548,7 +574,7 @@ static void Render(const nb::UiState& state,float seconds) {
 void __cdecl main() {
     InitializeCriticalSection(&StateLock); InitializeCriticalSection(&LogLock);
     for(int i=0;i<nb::MaxStreams;++i) { Streams[i].thread=NULL; Streams[i].socket=INVALID_SOCKET; }
-    LoadLogin();
+    LoadSettings();
     DescribeSettings();
     nb::InitUi();
     if(!InitGraphics()) XLaunchNewImage(XLAUNCH_KEYWORD_DASH,0);

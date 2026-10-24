@@ -191,7 +191,7 @@ static void Files(float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+18,Hex(Muted),"FILES NEXT TO THE XEX");
     Text(Body,x+28,y+52,Hex(White),"FastFTP360.ini");
-    Text(Body,x+200,y+52,Hex(Muted),"FTP login");
+    Text(Body,x+200,y+52,Hex(Muted),"Login and settings");
     Text(Body,x+460,y+52,Hex(White),"FastFTP360.log");
     Text(Body,x+640,y+52,Hex(Muted),"FTP activity");
 }
