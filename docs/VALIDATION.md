@@ -1,3 +1,7 @@
+# FTP server fixes (unreleased)
+
+`tests/ftp.py` has 45 checks, 16 of them new: long names and paths, over-long command lines, `ABOR` during uploads and downloads, a failed overwrite keeping the old file, an upload cancelled by hanging up, a data connection from a second address (127.0.0.2) being refused, and the `PASV` address coming from the control connection. They passed on Linux (server built with `tests/ftp_posix.h`, three runs in a row). The same tests against the previous `ftp.cpp` stop at the first long name: the server process ends, as the Xbox app would. On Windows (VS2022 + Xbox 360 SDK, commit `aab22f7`) the PC app, the Xbox XEX and the host tests built with no errors (`getsockname` links in XNet), `tests/protocol.py` passed 53 checks and `tests/ftp.py` 45, once the deep-folder check had a path short enough for Windows (fixed in the next commit). Console runs are **not yet verified**.
+
 # v0.2.0 validation
 
 `tests/protocol.py` now has 53 checks. On top of the v0.1.3 checks, new ones cover the full data check in both directions (every timed byte counted), a single flipped timed byte being rejected, two parallel streams on one listener, the automatic PC buffer setting in both directions, rejection of unknown direction-field flags, and prompt rejection of protocol v2 (app 0.1.3) peers.

@@ -1,4 +1,9 @@
-"""FTP server tests on Windows loopback with Python's ftplib; no Xbox required."""
+"""FTP server tests on loopback with Python's ftplib; no Xbox required.
+
+On Windows, build.ps1 -Tests builds build/host/ftp-host.exe and runs this. On
+Linux or macOS, build the same server first:
+  g++ -std=c++11 -O1 -include tests/ftp_posix.h tests/ftp_host.cpp shared/ftp.cpp shared/bench.cpp -o build/host/ftp-host -lpthread
+"""
 import contextlib
 import ftplib
 import io
@@ -11,6 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1048576
+HOST = ROOT / ("build/host/ftp-host.exe" if os.name == "nt" else "build/host/ftp-host")
+WINDOWLESS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 passed = 0
 
 
@@ -41,9 +48,8 @@ def pattern(seed, count):
 @contextlib.contextmanager
 def server(folder, sessions=1, credentials=()):
     port = free_port()
-    process = subprocess.Popen([str(ROOT / "build/host/ftp-host.exe"), str(port), str(folder), str(sessions), *credentials],
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
+    process = subprocess.Popen([str(HOST), str(port), str(folder), str(sessions), *credentials],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **WINDOWLESS)
     try:
         ready = []
         thread = threading.Thread(target=lambda: ready.append(process.stdout.readline()), daemon=True)
@@ -189,10 +195,168 @@ with tempfile.TemporaryDirectory() as temp:
         check("the log records login, upload, rename, delete and disconnect with the client address",
               len(log) == len(expected) and all(line.startswith("127.0.0.1  " + text) for line, text in zip(log, expected)))
 
+    class Raw:
+        """A control connection driven by hand, for what ftplib cannot do."""
+
+        def __init__(self, port):
+            self.sock = socket.create_connection(("127.0.0.1", port), timeout=20)
+            self.file = self.sock.makefile("rb")
+            self.reply()
+            self.command("USER anyone")
+            self.command("PASS anything")
+
+        def reply(self):
+            line = self.file.readline().decode("latin-1").rstrip("\r\n")
+            while len(line) > 3 and line[3] == "-":
+                line = self.file.readline().decode("latin-1").rstrip("\r\n")
+            return line
+
+        def command(self, text):
+            self.sock.sendall(text.encode("latin-1") + b"\r\n")
+            return self.reply()
+
+        def hang_up(self):
+            self.file.close()
+            self.sock.close()
+
+        def passive(self):
+            reply = self.command("PASV")
+            numbers = reply[reply.index("(") + 1:reply.index(")")].split(",")
+            return reply, int(numbers[4]) * 256 + int(numbers[5])
+
+    def leftovers(folder):
+        return [p.name for p in folder.iterdir() if p.name.startswith("FastFTP360-")]
+
+    with server(served, sessions=0) as (port, host):
+        ftp = login(port)
+        reply = ftp.sendcmd("PASV")
+        check("PASV announces the address the client connected to", "(127,0,0,1," in reply)
+
+        # Finding 1: long names and paths get an error reply instead of crashing the app.
+        try:
+            ftp.sendcmd("SIZE /HDD/" + "a" * 300)
+            answered = ""
+        except ftplib.error_perm as error:
+            answered = str(error)
+        check("a 300-character name is refused, not a crash", answered.startswith("550") and ftp.voidcmd("NOOP").startswith("200"))
+        try:
+            ftp.sendcmd("RNFR /HDD/" + "e/" * 280 + "x")
+            answered = ""
+        except ftplib.error_perm as error:
+            answered = str(error)
+        check("a 560-character rename path is refused, not a crash", answered.startswith("550") and ftp.voidcmd("NOOP").startswith("200"))
+        try:
+            ftp.storbinary("STOR /HDD/" + "b" * 300, io.BytesIO(b"x"))
+            answered = ""
+        except ftplib.error_perm as error:
+            answered = str(error)
+        check("STOR with an over-long name says the name is too long", answered.startswith("553") and "too long" in answered)
+        # Short enough to create under a Windows temp folder; /HDD/<40>/<250> still passes the 259 limit.
+        deep = "c" * 40
+        ftp.mkd("/HDD/" + deep)
+        ftp.cwd("/HDD/" + deep)
+        try:
+            ftp.sendcmd("SIZE " + "d" * 250)
+            answered = ""
+        except ftplib.error_perm as error:
+            answered = str(error)
+        check("a long relative path from a deep folder is refused", answered.startswith("550") and ftp.pwd() == "/HDD/" + deep)
+        ftp.cwd("/HDD")
+        ftp.rmd(deep)
+        try:
+            ftp.sendcmd("NOOP " + "x" * 700)
+            answered = ""
+        except ftplib.error_perm as error:
+            answered = str(error)
+        check("an over-long command line gets 500 and the session goes on", answered.startswith("500") and ftp.voidcmd("NOOP").startswith("200"))
+        long_name = "n" * 100 + ".bin"
+        ftp.storbinary("STOR /HDD/" + long_name, io.BytesIO(b"long"))
+        check("names longer than FATX's 42 characters still work where the drive allows them",
+              (served / long_name).read_bytes() == b"long")
+        ftp.delete("/HDD/" + long_name)
+
+        # Finding 2: a failed overwrite keeps the old file.
+        original = os.urandom(MIB + 7)
+        ftp.storbinary("STOR /HDD/keep.bin", io.BytesIO(original))
+        raw = Raw(port)
+        _, data_port = raw.passive()
+        data = socket.create_connection(("127.0.0.1", data_port), timeout=20)
+        check("an overwrite starts", raw.command("STOR /HDD/keep.bin").startswith("150"))
+        data.sendall(os.urandom(MIB))
+        raw.sock.sendall(b"ABOR\r\n")
+        first, second = raw.reply(), raw.reply()
+        data.close()
+        check("ABOR during an upload answers 426 then 226", first.startswith("426") and second.startswith("226"))
+        check("an aborted overwrite leaves the old file as it was", (served / "keep.bin").read_bytes() == original and not leftovers(served))
+        replacement = os.urandom(2 * MIB + 3)
+        ftp.storbinary("STOR /HDD/keep.bin", io.BytesIO(replacement))
+        check("a finished overwrite replaces the file and leaves no temporary files",
+              (served / "keep.bin").read_bytes() == replacement and not leftovers(served))
+
+        # Finding 3: a client that cancels by hanging up does not leave a file that looks complete.
+        raw.command("NOOP")
+        _, data_port = raw.passive()
+        data = socket.create_connection(("127.0.0.1", data_port), timeout=20)
+        raw.command("STOR /HDD/cancelled.bin")
+        data.sendall(os.urandom(MIB // 2))
+        raw.hang_up()
+        data.close()
+        raw = Raw(port)
+        _, data_port = raw.passive()
+        data = socket.create_connection(("127.0.0.1", data_port), timeout=20)
+        raw.command("STOR /HDD/keep.bin")
+        data.sendall(os.urandom(MIB // 2))
+        raw.hang_up()
+        data.close()
+        for _ in range(50):
+            if not (served / "cancelled.bin").exists():
+                break
+            threading.Event().wait(0.1)
+        threading.Event().wait(0.5)
+        check("an upload cancelled by closing the connections is not kept",
+              not (served / "cancelled.bin").exists() and (served / "keep.bin").read_bytes() == replacement and not leftovers(served))
+        stream = ftp.transfercmd("RETR /NULL/1024MB.bin")
+        stream.recv(65536)
+        first = ftp.abort()
+        second = ftp.getresp()
+        stream.close()
+        check("ABOR during a download stops it with 426, then 226", first.startswith("426") and second.startswith("226"))
+
+        # Finding 4: only the client's own address may open the data connection.
+        raw = Raw(port)
+        _, data_port = raw.passive()
+        intruder = socket.socket()
+        intruder.bind(("127.0.0.2", 0))
+        intruder.connect(("127.0.0.1", data_port))
+        intruder.settimeout(20)
+        raw.sock.sendall(b"LIST /HDD\r\n")
+        check("LIST starts", raw.reply().startswith("150"))
+        try:
+            stolen = intruder.recv(4096)
+        except ConnectionError:
+            stolen = b""
+        data = socket.create_connection(("127.0.0.1", data_port), timeout=20)
+        listing = bytearray()
+        while True:
+            chunk = data.recv(65536)
+            if not chunk:
+                break
+            listing.extend(chunk)
+        check("a data connection from another address is refused; the client's own gets the listing",
+              stolen == b"" and b"keep.bin" in listing and raw.reply().startswith("226"))
+        intruder.close()
+        data.close()
+        raw.command("QUIT")
+        ftp.delete("/HDD/keep.bin")
+        ftp.quit()
+        host.kill()
+        output = host.communicate(timeout=10)[0]
+        check("the log names the refused address", "Refused a data connection from 127.0.0.2" in output)
+
     def login_file(text):
         path = Path(temp) / "FastFTP360.ini"
         path.write_bytes(text.encode("latin-1"))
-        out = subprocess.run([str(ROOT / "build/host/ftp-host.exe"), "--login-file", str(path)],
+        out = subprocess.run([str(HOST), "--login-file", str(path)],
                              capture_output=True, text=True, timeout=10).stdout.split()
         return out[1:]
 

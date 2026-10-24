@@ -10,7 +10,11 @@
 namespace nb {
 namespace {
 const double ControlIdleSeconds=300, DataWaitSeconds=15, DataIdleSeconds=30;
-volatile LONG NextDataPort=0;
+const char AbortedReply[]="426 Transfer aborted by the client.";
+// Longest file name and path accepted from a client: FAT32 names and Windows
+// MAX_PATH. FATX itself allows only 42 characters per name.
+enum { NameMax=255, PathMax=259, FatxNameMax=42 };
+volatile LONG NextDataPort=0,NextTemporary=0;
 
 // Overlaps disk and network: a helper thread writes behind (uploads) or reads
 // ahead (downloads) through two buffers that alternate with the socket side.
@@ -83,15 +87,24 @@ class Session {
     char cwd_[512],input_[1024],renameFrom_[512];
     char user_[64],peer_[24],renamePath_[600];
     int inputCount_;
-    bool loggedIn_;
+    // peerAddress_ is the client's IPv4 address and localAddress_ the Xbox
+    // address it connected to (network order, 0 if unknown).
+    DWORD peerAddress_,localAddress_;
+    // discarding_: the rest of an over-long command line is being skipped.
+    // aborted_: during a transfer the client sent ABOR or closed the control connection.
+    bool loggedIn_,discarding_,aborted_;
 public:
-    Session(Shared& shared,SOCKET control) : shared_(shared),control_(control),passive_(INVALID_SOCKET),inputCount_(0),loggedIn_(!shared.user) {
+    Session(Shared& shared,SOCKET control) : shared_(shared),control_(control),passive_(INVALID_SOCKET),inputCount_(0),
+        peerAddress_(0),localAddress_(0),loggedIn_(!shared.user),discarding_(false),aborted_(false) {
         strcpy_s(cwd_,"/"); renameFrom_[0]=0; renamePath_[0]=0; user_[0]=0; strcpy_s(peer_,"?");
         sockaddr_in address; int length=sizeof(address);
         if(!getpeername(control,reinterpret_cast<sockaddr*>(&address),&length)) {
+            peerAddress_=address.sin_addr.s_addr;
             const BYTE* ip=reinterpret_cast<const BYTE*>(&address.sin_addr);
             _snprintf_s(peer_,sizeof(peer_),_TRUNCATE,"%u.%u.%u.%u",ip[0],ip[1],ip[2],ip[3]);
         }
+        length=sizeof(address);
+        if(!getsockname(control,reinterpret_cast<sockaddr*>(&address),&length)) localAddress_=address.sin_addr.s_addr;
     }
     ~Session() { ClosePassive(); }
     void Run();
@@ -108,21 +121,51 @@ private:
     void Progress(const char* operation,const char* file,U64 bytes,double seconds,bool done,bool ok) {
         if(shared_.observer->progress) shared_.observer->progress(shared_.observer->context,operation,file,bytes,seconds,done,ok);
     }
-    bool Wait(SOCKET s,bool writing,double timeout) {
+    // During a transfer (watchControl) the control connection is watched too,
+    // so ABOR or a client that hangs up ends the transfer at once.
+    bool Wait(SOCKET s,bool writing,double timeout,bool watchControl=false) {
         double end=Now()+timeout;
         for(;;) {
             if(Cancelled() || Now()>end) return false;
-            fd_set set; FD_ZERO(&set); FD_SET(s,&set);
+            const bool watching=watchControl && inputCount_<int(sizeof(input_));
+            fd_set readable,writable; FD_ZERO(&readable); FD_ZERO(&writable);
+            FD_SET(s,writing ? &writable : &readable);
+            if(watching) FD_SET(control_,&readable);
             timeval interval={0,100000};
-            int rc=select(0,writing?NULL:&set,writing?&set:NULL,NULL,&interval);
-            if(rc>0) return true;
+            int rc=select(0,&readable,writing?&writable:NULL,NULL,&interval);
             if(rc==SOCKET_ERROR) return false;
+            if(watching && FD_ISSET(control_,&readable) && ControlAborted()) return false;
+            if(rc>0 && FD_ISSET(s,writing ? &writable : &readable)) return true;
         }
     }
+    // Reads whatever the client sent on the control connection into the
+    // command buffer (ReadCommand handles it after the transfer) and reports
+    // whether it was ABOR at the start of a line, or the connection closed.
+    // FileZilla and others cancel by closing; RFC 959 clients send ABOR.
+    bool ControlAborted() {
+        if(aborted_) return true;
+        int room=int(sizeof(input_))-inputCount_;
+        if(room>0) {
+            fd_set readable; FD_ZERO(&readable); FD_SET(control_,&readable);
+            timeval now={0,0};
+            if(select(0,&readable,NULL,NULL,&now)>0) {
+                int got=recv(control_,input_+inputCount_,room,0);
+                if(got==0 || (got<0 && WSAGetLastError()!=WSAEWOULDBLOCK)) aborted_=true;
+                else if(got>0) inputCount_+=got;
+            }
+        }
+        for(int i=0;!aborted_ && i+4<=inputCount_;++i) {
+            // Telnet interrupt bytes (0xFF...) may come before an urgent ABOR.
+            unsigned char before=i ? static_cast<unsigned char>(input_[i-1]) : '\n';
+            if((before<32 || before>=0x7F) && !_strnicmp(input_+i,"ABOR",4) &&
+               (i+4==inputCount_ || input_[i+4]=='\r' || input_[i+4]=='\n')) aborted_=true;
+        }
+        return aborted_;
+    }
     // Sends in WriteSize pieces with a yield, as the benchmark does on Xbox.
-    bool SendAll(SOCKET s,const char* data,int count) {
+    bool SendAll(SOCKET s,const char* data,int count,bool watchControl=false) {
         while(count) {
-            if(!Wait(s,true,DataIdleSeconds)) return false;
+            if(!Wait(s,true,DataIdleSeconds,watchControl)) return false;
             int sent=send(s,data,count>WriteSize ? WriteSize : count,0);
             if(sent>0) { data+=sent; count-=sent; Sleep(0); }
             else if(sent==0 || WSAGetLastError()!=WSAEWOULDBLOCK) return false;
@@ -130,9 +173,9 @@ private:
         }
         return true;
     }
-    int Receive(SOCKET s,char* data,int count,double timeout) {
+    int Receive(SOCKET s,char* data,int count,double timeout,bool watchControl=false) {
         for(;;) {
-            if(!Wait(s,false,timeout)) return -1;
+            if(!Wait(s,false,timeout,watchControl)) return -1;
             int got=recv(s,data,count,0);
             if(got>=0) return got;
             if(WSAGetLastError()!=WSAEWOULDBLOCK) return -1;
@@ -140,14 +183,19 @@ private:
         }
     }
     bool Reply(const char* text) {
-        char line[600]; int length=_snprintf_s(line,sizeof(line),_TRUNCATE,"%s\r\n",text);
-        return length>0 && SendAll(control_,line,length);
+        // An over-long reply is cut short rather than dropped, so the client
+        // never waits for a reply that will not come.
+        char line[600]; int length=_snprintf_s(line,sizeof(line)-2,_TRUNCATE,"%s",text);
+        if(length<0) length=int(strlen(line));
+        line[length]='\r'; line[length+1]='\n';
+        return SendAll(control_,line,length+2);
     }
-    bool ReadCommand(char* line,size_t capacity);
+    int ReadCommand(char* line,size_t capacity);
     void ClosePassive() { if(passive_!=INVALID_SOCKET) { closesocket(passive_); passive_=INVALID_SOCKET; } }
     bool OpenPassive(int& port);
     SOCKET AcceptData();
     void CloseData(SOCKET data) { shutdown(data,SD_SEND); closesocket(data); }
+    enum { TopLevel=-1, Invalid=-2, TooLong=-3 };
     int Resolve(const char* argument,char* native,size_t nativeCapacity,char* name,size_t nameCapacity,char* path,size_t pathCapacity);
     bool IsDirectory(int root,const char* native,int depth);
     void List(const char* argument,bool namesOnly);
@@ -156,20 +204,28 @@ private:
     bool TransferDone(const char* operation,const char* name,const char* path,U64 bytes,double begin,bool ok,const char* failure);
 };
 
-bool Session::ReadCommand(char* line,size_t capacity) {
+// Returns 1 with the next command in line, -1 for a line too long to use,
+// or 0 when the connection ends. A line ends at CR or LF; empty lines and
+// Telnet bytes before the command (from an urgent ABOR) are skipped.
+int Session::ReadCommand(char* line,size_t capacity) {
     for(;;) {
-        for(int i=0;i<inputCount_;++i) {
-            if(input_[i]!='\n') continue;
-            int length=i;
-            while(length>0 && (input_[length-1]=='\r' || input_[length-1]==' ')) --length;
-            if(size_t(length)>=capacity) length=int(capacity-1);
-            memcpy(line,input_,length); line[length]=0;
-            memmove(input_,input_+i+1,inputCount_-i-1); inputCount_-=i+1;
-            return true;
+        int end=0;
+        while(end<inputCount_ && input_[end]!='\n' && input_[end]!='\r') ++end;
+        if(end<inputCount_) {
+            int start=0,length=end;
+            while(start<length && (static_cast<unsigned char>(input_[start])<=' ' || static_cast<unsigned char>(input_[start])>=0x7F)) ++start;
+            while(length>start && input_[length-1]==' ') --length;
+            const bool tooLong=discarding_ || size_t(length-start)>=capacity;
+            if(!tooLong) { memcpy(line,input_+start,length-start); line[length-start]=0; }
+            memmove(input_,input_+end+1,inputCount_-end-1); inputCount_-=end+1;
+            discarding_=false;
+            if(tooLong) return -1;
+            if(line[0]) return 1;
+            continue;
         }
-        if(inputCount_==sizeof(input_)) inputCount_=0; // Over-long line: discard it.
+        if(inputCount_==int(sizeof(input_))) { inputCount_=0; discarding_=true; } // Skip to the line's end.
         int got=Receive(control_,input_+inputCount_,int(sizeof(input_))-inputCount_,ControlIdleSeconds);
-        if(got<=0) return false;
+        if(got<=0) return 0;
         inputCount_+=got;
     }
 }
@@ -196,41 +252,69 @@ bool Session::OpenPassive(int& port) {
 SOCKET Session::AcceptData() {
     if(passive_==INVALID_SOCKET) return INVALID_SOCKET;
     SOCKET data=INVALID_SOCKET;
-    if(Wait(passive_,false,DataWaitSeconds)) data=accept(passive_,NULL,NULL);
+    const double end=Now()+DataWaitSeconds;
+    while(data==INVALID_SOCKET && Wait(passive_,false,end-Now())) {
+        sockaddr_in address; int length=sizeof(address);
+        data=accept(passive_,reinterpret_cast<sockaddr*>(&address),&length);
+        // Only the client on this control connection may connect. Passive ports
+        // are easy to guess, so anyone else could otherwise take the transfer.
+        if(data!=INVALID_SOCKET && peerAddress_ && address.sin_addr.s_addr!=peerAddress_) {
+            const BYTE* ip=reinterpret_cast<const BYTE*>(&address.sin_addr);
+            Log("Refused a data connection from %u.%u.%u.%u",ip[0],ip[1],ip[2],ip[3]);
+            closesocket(data); data=INVALID_SOCKET;
+        }
+    }
     ClosePassive();
     char error[100];
     if(data!=INVALID_SOCKET && !PrepareSocket(data,error,sizeof(error))) { closesocket(data); data=INVALID_SOCKET; }
     return data;
 }
 
-// Maps a client path to a root index (-1 for the virtual top level), the native
-// path, the final name and the normalized FTP path. Returns -2 if invalid.
+// Appends text at out+used if it fits within limit characters and capacity.
+static bool Append(char* out,size_t capacity,size_t limit,size_t& used,const char* text) {
+    size_t length=strlen(text);
+    if(used+length>limit || used+length>=capacity) return false;
+    memcpy(out+used,text,length+1); used+=length;
+    return true;
+}
+
+// Maps a client path to a root index (TopLevel for the virtual top level), the
+// native path, the final name and the normalized FTP path. Returns Invalid for
+// a bad name or unknown drive, and TooLong past NameMax or PathMax; nothing is
+// ever copied past a buffer, whatever the client sends.
 int Session::Resolve(const char* argument,char* native,size_t nativeCapacity,char* name,size_t nameCapacity,char* path,size_t pathCapacity) {
-    char combined[1100];
-    if(argument[0]=='/') strcpy_s(combined,argument);
-    else _snprintf_s(combined,sizeof(combined),_TRUNCATE,"%s/%s",cwd_,argument);
+    path[0]=0; name[0]=0; native[0]=0;
+    char combined[1200];
+    int written=argument[0]=='/' ? _snprintf_s(combined,sizeof(combined),_TRUNCATE,"%s",argument)
+                                 : _snprintf_s(combined,sizeof(combined),_TRUNCATE,"%s/%s",cwd_,argument);
+    if(written<0) return TooLong;
     const char* parts[64]; int count=0;
     for(char* token=combined;;) {
         char* slash=strchr(token,'/');
         if(slash) *slash=0;
         if(!strcmp(token,"..")) { if(count) --count; }
         else if(token[0] && strcmp(token,".")) {
-            for(const char* c=token;*c;++c) if(*c=='\\' || *c==':' || *c=='*' || *c=='?' || static_cast<unsigned char>(*c)<32) return -2;
-            if(count==64) return -2;
+            for(const char* c=token;*c;++c) if(*c=='\\' || *c==':' || *c=='*' || *c=='?' || static_cast<unsigned char>(*c)<32) return Invalid;
+            if(strlen(token)>size_t(NameMax) || count==64) return TooLong;
             parts[count++]=token;
         }
         if(!slash) break;
         token=slash+1;
     }
-    path[0]=0; name[0]=0; native[0]=0;
-    for(int i=0;i<count;++i) { strcat_s(path,pathCapacity,"/"); strcat_s(path,pathCapacity,parts[i]); }
-    if(!count) { strcpy_s(path,pathCapacity,"/"); return -1; }
+    size_t used=0;
+    for(int i=0;i<count;++i)
+        if(!Append(path,pathCapacity,PathMax,used,"/") || !Append(path,pathCapacity,PathMax,used,parts[i])) return TooLong;
+    if(!count) { strcpy_s(path,pathCapacity,"/"); return TopLevel; }
     int root=-1;
     for(int i=0;i<shared_.rootCount;++i) if(!_stricmp(parts[0],shared_.roots[i].name)) root=i;
-    if(root<0) return -2;
+    if(root<0) return Invalid;
+    if(strlen(parts[count-1])>=nameCapacity) return TooLong;
     strcpy_s(name,nameCapacity,parts[count-1]);
-    if(shared_.roots[root].path) _snprintf_s(native,nativeCapacity,_TRUNCATE,"%s\\",shared_.roots[root].path);
-    for(int i=1;i<count;++i) { if(i>1) strcat_s(native,nativeCapacity,"\\"); strcat_s(native,nativeCapacity,parts[i]); }
+    used=0;
+    if(shared_.roots[root].path && (!Append(native,nativeCapacity,PathMax,used,shared_.roots[root].path) ||
+       !Append(native,nativeCapacity,PathMax,used,"\\"))) return TooLong;
+    for(int i=1;i<count;++i)
+        if((i>1 && !Append(native,nativeCapacity,PathMax,used,"\\")) || !Append(native,nativeCapacity,PathMax,used,parts[i])) return TooLong;
     return root;
 }
 
@@ -267,7 +351,7 @@ void Session::List(const char* argument,bool namesOnly) {
     while(argument[0]=='-') { const char* space=strchr(argument,' '); argument=space ? space+1 : ""; }
     char native[600],name[300],path[600];
     int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
-    if(root==-2) { Reply("550 No such file or folder."); return; }
+    if(root<TopLevel) { Reply("550 No such file or folder."); return; }
     int depth=Depth(path);
     if(passive_==INVALID_SOCKET) { Reply("425 Use PASV or EPSV first."); return; }
     // Build the whole listing before opening the data connection.
@@ -349,6 +433,7 @@ void Session::Retrieve(const char* argument) {
     SOCKET data=AcceptData();
     if(data==INVALID_SOCKET) { if(file!=INVALID_HANDLE_VALUE) CloseHandle(file); Reply("425 Data connection was not opened."); return; }
     double begin=Now(),update=begin; U64 bytes=0; bool ok=true; const char* failure="426 Transfer interrupted.";
+    aborted_=false;
     if(null) {
         unsigned char* block=static_cast<unsigned char*>(malloc(Chunk));
         if(!block) ok=false;
@@ -356,7 +441,7 @@ void Session::Retrieve(const char* argument) {
             Pattern(block,0x46545021);
             while(ok && bytes<size) {
                 int count=int(size-bytes<U64(Chunk) ? size-bytes : Chunk);
-                ok=SendAll(data,reinterpret_cast<const char*>(block),count);
+                ok=SendAll(data,reinterpret_cast<const char*>(block),count,true);
                 if(ok) bytes+=count;
                 if(Now()-update>=0.25) { update=Now(); Progress("RETR",name,bytes,update-begin,false,true); }
             }
@@ -371,7 +456,7 @@ void Session::Retrieve(const char* argument) {
             if(!ok) break;
             if(pump.failed) { ok=false; failure="451 Read error on the Xbox drive."; break; }
             if(!pump.length[i]) break;
-            ok=SendAll(data,reinterpret_cast<const char*>(pump.buffer[i]),int(pump.length[i]));
+            ok=SendAll(data,reinterpret_cast<const char*>(pump.buffer[i]),int(pump.length[i]),true);
             if(ok) bytes+=pump.length[i];
             SetEvent(pump.freed[i]); pump.next^=1;
             if(Now()-update>=0.25) { update=Now(); Progress("RETR",name,bytes,update-begin,false,true); }
@@ -379,37 +464,68 @@ void Session::Retrieve(const char* argument) {
         EndPump(pump); CloseHandle(file);
     }
     CloseData(data);
+    if(aborted_) failure=AbortedReply;
     TransferDone("RETR",name,path,bytes,begin,ok,failure);
 }
 
+// A name for a temporary file in native's folder, unique while the app runs.
+static void TemporaryName(const char* native,const char* suffix,char* out,size_t capacity) {
+    const char* slash=strrchr(native,'\\');
+    int folder=slash ? int(slash-native)+1 : 0;
+    _snprintf_s(out,capacity,_TRUNCATE,"%.*sFastFTP360-%u.%s",folder,native,unsigned(InterlockedIncrement(&NextTemporary)),suffix);
+}
+// Puts the finished upload in place of the old file. The old file is moved
+// aside first and moved back if that fails, so one of them always survives.
+static bool ReplaceWithUpload(const char* temporary,const char* native) {
+    char aside[620]; TemporaryName(native,"old",aside,sizeof(aside));
+    if(!MoveFile(native,aside)) return false;
+    if(!MoveFile(temporary,native)) { MoveFile(aside,native); return false; }
+    DeleteFile(aside);
+    return true;
+}
+
 void Session::Store(const char* argument) {
-    char native[600],name[300],path[600];
+    char native[600],name[300],path[600],temporary[620]="";
     int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
+    if(root==TooLong) { Reply("553 The file name or path is too long."); return; }
     if(root<0 || Depth(path)<2) { Reply("553 Choose a file inside a drive folder."); return; }
     if(passive_==INVALID_SOCKET) { Reply("425 Use PASV or EPSV first."); return; }
     bool null=!shared_.roots[root].path;
     if(null && Depth(path)!=2) { Reply("553 The null folder has no subfolders."); return; }
     HANDLE file=INVALID_HANDLE_VALUE;
     if(!null) {
-        file=CreateFile(native,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
-        if(file==INVALID_HANDLE_VALUE) { Reply("553 Cannot create the file."); return; }
+        DWORD attributes=GetFileAttributes(native);
+        if(attributes!=DWORD(-1) && (attributes&FILE_ATTRIBUTE_DIRECTORY)) { Reply("553 A folder already has that name."); return; }
+        // Replacing a file: receive into a temporary file next to it, so a
+        // failed or cancelled upload leaves the old file as it was.
+        if(attributes!=DWORD(-1)) TemporaryName(native,"tmp",temporary,sizeof(temporary));
+        file=CreateFile(temporary[0] ? temporary : native,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(file==INVALID_HANDLE_VALUE) {
+            Reply(strlen(name)>size_t(FatxNameMax) ? "553 Cannot create the file. Xbox drives allow names of up to 42 characters." : "553 Cannot create the file.");
+            return;
+        }
     }
+    const char* written=temporary[0] ? temporary : native;
     Reply("150 Ready to receive.");
     SOCKET data=AcceptData();
     if(data==INVALID_SOCKET) {
-        if(file!=INVALID_HANDLE_VALUE) { CloseHandle(file); DeleteFile(native); }
+        if(file!=INVALID_HANDLE_VALUE) { CloseHandle(file); DeleteFile(written); }
         Reply("425 Data connection was not opened."); return;
     }
     double begin=Now(),update=begin; U64 bytes=0; bool ok=true; const char* failure="426 Transfer interrupted.";
+    aborted_=false;
     if(null) {
         char* sink=static_cast<char*>(malloc(Chunk*4));
         if(!sink) ok=false;
         for(;ok;) {
-            int got=Receive(data,sink,Chunk*4,DataIdleSeconds);
+            int got=Receive(data,sink,Chunk*4,DataIdleSeconds,true);
             if(got<0) ok=false; else if(!got) break; else bytes+=got;
             if(Now()-update>=0.25) { update=Now(); Progress("STOR",name,bytes,update-begin,false,true); }
         }
         free(sink);
+        // A client that cancels may close the data connection first: the end
+        // of the data is only a finished upload if the client did not abort.
+        if(ok && ControlAborted()) ok=false;
     } else {
         Pump pump; bool eof=false;
         if(!StartPump(pump,file,true)) { ok=false; failure="451 Out of memory."; }
@@ -419,7 +535,7 @@ void Session::Store(const char* argument) {
             if(!ok || pump.failed) { ok=false; break; }
             DWORD filled=0;
             while(filled<FtpBuffer) {
-                int got=Receive(data,reinterpret_cast<char*>(pump.buffer[i])+filled,int(FtpBuffer-filled),DataIdleSeconds);
+                int got=Receive(data,reinterpret_cast<char*>(pump.buffer[i])+filled,int(FtpBuffer-filled),DataIdleSeconds,true);
                 if(got<0) { ok=false; break; }
                 if(!got) { eof=true; break; }
                 filled+=got; bytes+=got;
@@ -439,9 +555,14 @@ void Session::Store(const char* argument) {
         EndPump(pump);
         if(ok && !FlushFileBuffers(file)) { ok=false; failure="452 Write error on the Xbox drive. Is it full?"; }
         CloseHandle(file);
-        if(!ok) DeleteFile(native);
+        // A client that cancels may close the data connection just before it
+        // hangs up or sends ABOR; by the time the file is flushed, that is in.
+        if(ok && ControlAborted()) ok=false;
+        if(ok && temporary[0] && !ReplaceWithUpload(temporary,native)) { ok=false; failure="451 Cannot replace the old file. It was left as it was."; }
+        if(!ok) DeleteFile(written);
     }
     CloseData(data);
+    if(aborted_) failure=AbortedReply;
     TransferDone("STOR",name,path,bytes,begin,ok,failure);
 }
 
@@ -449,7 +570,8 @@ void Session::Run() {
     Log("Connected");
     Reply(shared_.user ? "220 FastFTP360 ready." : "220 FastFTP360 ready. Any user name and password.");
     char line[600];
-    while(!Cancelled() && ReadCommand(line,sizeof(line))) {
+    for(int status;!Cancelled() && (status=ReadCommand(line,sizeof(line)))!=0;) {
+        if(status<0) { Reply("500 Command line too long."); continue; }
         char verb[8]={0}; const char* argument=line;
         for(int i=0;i<7 && *argument && *argument!=' ';++i,++argument) verb[i]=char(toupper(static_cast<unsigned char>(*argument)));
         while(*argument && *argument!=' ') ++argument;
@@ -479,13 +601,16 @@ void Session::Run() {
         else if(!strcmp(verb,"CWD") || !strcmp(verb,"XCWD") || !strcmp(verb,"CDUP") || !strcmp(verb,"XCUP")) {
             const char* target=(verb[0]=='C' && verb[1]=='D') || !strcmp(verb,"XCUP") ? ".." : argument;
             int root=Resolve(target,native,sizeof(native),name,sizeof(name),path,sizeof(path));
-            if(root>-2 && IsDirectory(root,native,Depth(path))) { strcpy_s(cwd_,path); Reply("250 Folder changed."); }
+            if(root>=TopLevel && IsDirectory(root,native,Depth(path))) { strcpy_s(cwd_,path); Reply("250 Folder changed."); }
             else Reply("550 No such folder.");
         }
         else if(!strcmp(verb,"PASV") || !strcmp(verb,"EPSV")) {
             int port=0;
             if(!OpenPassive(port)) { Reply("425 Cannot open a passive port."); continue; }
-            const BYTE* ip=reinterpret_cast<const BYTE*>(&shared_.address);
+            // The address the client reached us on; the one found at server
+            // start is only a fallback, as it is 0.0.0.0 before DHCP finishes.
+            const DWORD address=localAddress_ ? localAddress_ : shared_.address;
+            const BYTE* ip=reinterpret_cast<const BYTE*>(&address);
             if(verb[0]=='P') _snprintf_s(text,sizeof(text),_TRUNCATE,"227 Entering Passive Mode (%u,%u,%u,%u,%d,%d).",ip[0],ip[1],ip[2],ip[3],port>>8,port&255);
             else _snprintf_s(text,sizeof(text),_TRUNCATE,"229 Entering Extended Passive Mode (|||%d|)",port);
             Reply(text);
@@ -527,7 +652,7 @@ void Session::Run() {
                 Reply(done ? "250 Renamed." : "550 Cannot rename."); renameFrom_[0]=0;
             }
         }
-        else if(!strcmp(verb,"ABOR")) Reply("226 No transfer to abort.");
+        else if(!strcmp(verb,"ABOR")) Reply("226 Abort complete.");
         else Reply("502 Command not implemented.");
     }
     Log("Disconnected");

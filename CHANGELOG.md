@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fixed: a long file name or path could crash the app.** A file name of 300 or more characters, or a path of more than about 500, from a logged-in FTP client overflowed a fixed buffer and ended the program. Names over 255 characters and paths over 259 now get a `550`/`553` reply, command lines over 600 characters get `500`, and over-long replies are cut instead of never being sent.
+- **Fixed: a failed overwrite deleted the original file.** An upload to an existing name now goes to a temporary `FastFTP360-<number>.tmp` file in the same folder and replaces the old file only after it has been written and flushed. A failed or cancelled upload leaves the old file untouched.
+- **Fixed: a cancelled upload could be kept as if it had finished.** During a transfer the server now watches the control connection: `ABOR` (also sent as urgent data with Telnet interrupt bytes) or a client that hangs up stops the transfer with `426`, then `ABOR` gets `226`. An unfinished upload is deleted. Downloads stop on `ABOR` too, instead of waiting 30 seconds.
+- **Fixed: anyone on the network could take a transfer.** Passive data connections are accepted only from the logged-in client's IP address. Others are closed and logged as `Refused a data connection from ...`.
+- **Fixed: passive mode could announce 0.0.0.0.** The `PASV` address is now the Xbox address the client connected to, instead of the one read when the server started (which is 0.0.0.0 if DHCP hadn't finished).
+- `tests/ftp.py` runs on Linux and macOS too, with `tests/ftp_posix.h`; 16 new checks for the fixes above (45 in all).
 - Renamed to **FastFTP360**, since "FastFTP" is also the name of other FTP tools: `FastFTP360.xex`, `FastFTP360-PC.exe`, `FastFTP360.sln`, the screen header, the FTP greeting, the logo, `FastFTP360.ini`, `FastFTP360.log` and the disk test's `FASTFTP360-DISKTEST.TMP`. A login saved in the old `FastFTP.ini` is still read when `FastFTP360.ini` doesn't exist yet, and the next login change saves it under the new name. Old `FastFTP.log` files are left alone.
 
 ## 0.4.1

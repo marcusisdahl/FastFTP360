@@ -9,7 +9,7 @@
 static double Started;
 static bool Cancelled(void*) { return nb::Now()-Started>120; }
 static void Progress(void*,const char* operation,const char* file,nb::U64 bytes,double seconds,bool done,bool ok) {
-    if(done) { printf("%s %s %s bytes=%I64u seconds=%.3f\n",ok ? "DONE" : "FAILED",operation,file,bytes,seconds); fflush(stdout); }
+    if(done) { printf("%s %s %s bytes=%llu seconds=%.3f\n",ok ? "DONE" : "FAILED",operation,file,bytes,seconds); fflush(stdout); }
 }
 static void Log(void*,const char* line) { printf("LOG %s\n",line); fflush(stdout); }
 int main(int argc,char** argv) {
@@ -37,7 +37,8 @@ int main(int argc,char** argv) {
     nb::FtpObserver observer={NULL,Cancelled,Progress,Log};
     printf("READY %s\n",argv[1]); fflush(stdout);
     Started=nb::Now();
-    bool ok=nb::ServeFtp(listener,roots,2,htonl(INADDR_LOOPBACK),0,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));
+    // No fallback address: passive replies must use the address the client reached.
+    bool ok=nb::ServeFtp(listener,roots,2,0,0,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));
     printf(ok ? "STOPPED\n" : "ERROR %s\n",error);
     closesocket(listener); WSACleanup(); return ok ? 0 : 3;
 }
