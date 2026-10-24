@@ -23,11 +23,15 @@ struct FtpObserver {
 // Serves passive-mode FTP on an already listening socket until cancelled, or
 // until maxSessions control connections have ended when maxSessions is nonzero.
 // address is the IPv4 address (network order) announced for passive data.
-// speedLimit caps all uploads and downloads together in MiB/s (0: no limit). processor
-// is the Xbox hardware thread for session threads (-1: the kernel chooses).
+// speedLimit caps all uploads and downloads together in MiB/s (0: no limit), or
+// with downloadsOnly only the downloads. processor is the Xbox hardware thread
+// for session threads (-1: the kernel chooses).
+// diskBlock 0 reads and writes files through the file cache in FtpBuffer
+// blocks; otherwise the cache is bypassed and the drive gets requests of
+// diskBlock bytes, a multiple of 64 KiB up to FtpBuffer.
 // With a NULL user any user name and password log in; otherwise both must match.
 bool ServeFtp(SOCKET listener, const FtpRoot* roots, int rootCount, DWORD address, int socketBuffer,
-              int speedLimit, int processor, int maxSessions, const char* user, const char* password,
+              int speedLimit, bool downloadsOnly, int processor, int diskBlock, int maxSessions, const char* user, const char* password,
               const FtpObserver& observer, char* error, size_t capacity);
 
 // The settings file next to the XEX holds "key=value" lines: the FTP login as

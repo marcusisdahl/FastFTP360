@@ -9,7 +9,7 @@ enum { UiRecentTransfers = 5 };
 struct UiState {
     char ip[48],message[100],disk[100],ftp[100];
     // Current setting values as shown; main.cpp owns the choices.
-    char buffers[32],cpu[24],diskTarget[16],diskBlock[16],drawing[16],speed[24];
+    char buffers[32],cpu[24],diskTarget[16],diskBlock[16],drawing[16],speed[24],diskIo[24];
     // FTP login; an empty user means any user name and password.
     char ftpUser[24],ftpPassword[24];
     // ftpActive counts FTP transfers moving data; drawing pauses while any is.

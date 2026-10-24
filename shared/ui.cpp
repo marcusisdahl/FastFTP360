@@ -10,10 +10,10 @@ namespace nb {
 UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),ftpActive(0),
     tab(0),focus(0),busy(0),keyboard(0),recentCount(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
-    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; speed[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
+    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; speed[0]=0; diskIo[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
 }
 // The Network tab has none: its tuning lives on the Settings tab.
-int SettingCount(int tab) { static const int rows[]={1,0,2,4}; return tab>=0 && tab<TabCount ? rows[tab] : 0; }
+int SettingCount(int tab) { static const int rows[]={1,0,2,5}; return tab>=0 && tab<TabCount ? rows[tab] : 0; }
 
 static ImFont* Small; static ImFont* Body; static ImFont* Heading; static ImFont* Hero;
 enum { Left=64, Right=1216, Top=36, Bottom=684 };
@@ -89,12 +89,13 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
         lines[2]="The test file is deleted afterwards.";
     } else if(s.tab==TabSettings) {
         title="Settings";
-        static const char* help[4][3]={
+        static const char* help[5][3]={
             {"Socket buffers for FTP and the network test.","Bigger is not always faster, and the Xbox may","refuse them. Startup default suits most people."},
             {"The hardware thread for network test streams","and FTP sessions. USB network work runs on","thread 2. Automatic suits most people."},
             {"Paused holds the screen while data moves.","Live drawing during Xbox sends has crashed the","console before. Keep Paused unless testing it."},
-            {"Caps FTP uploads and downloads together.","Try 12 or 16 if the console freezes during","fast transfers. Off is fastest."}};
-        for(int i=0;i<3;++i) lines[i]=help[s.focus>=0 && s.focus<4 ? s.focus : 0][i];
+            {"Caps FTP transfers, or only downloads (Xbox to","PC). Try 16 if the console freezes during fast","transfers. Off is fastest."},
+            {"How FTP reads and writes Xbox drives. Uncached","256 KiB skips the file cache and uploaded","faster in tests. Cached is the default."}};
+        for(int i=0;i<3;++i) lines[i]=help[s.focus>=0 && s.focus<5 ? s.focus : 0][i];
     } else if(s.tab==TabFtp) {
         static const char* names[]={"FTP server","FTP server on","Receiving upload","Sending download"};
         title=names[s.ftpPhase>=0 && s.ftpPhase<4 ? s.ftpPhase : 0];
@@ -151,12 +152,12 @@ static void Settings(const UiState& s,float x,float y,float w,float h) {
     const char* heading=s.tab==TabFtp ? "LOGIN" : s.tab==TabSettings ? "ADVANCED" : "SETTINGS";
     char caption[48]; _snprintf_s(caption,sizeof(caption),_TRUNCATE,s.busy ? "%s  (STOP TO CHANGE)" : "%s",heading);
     Text(Small,x+28,y+24,Hex(Muted),caption);
-    const char* labels[4]; const char* values[4]; int rows=SettingCount(s.tab);
+    const char* labels[5]; const char* values[5]; int rows=SettingCount(s.tab);
     if(s.tab==TabDisk) { labels[0]="Drive"; values[0]=s.diskTarget; labels[1]="Block size"; values[1]=s.diskBlock; }
     else if(s.tab==TabFtp) { labels[0]="Login"; values[0]=s.ftpUser[0] ? "On" : "Off, any user name and password"; }
     else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing;
-        labels[3]="FTP speed limit"; values[3]=s.speed; }
-    // Rows close up on the shorter FTP card and when four share the card.
+        labels[3]="FTP speed limit"; values[3]=s.speed; labels[4]="FTP disk I/O"; values[4]=s.diskIo; }
+    // Rows close up on the shorter FTP card and when four or more share the card.
     const float pitch=rows>3 ? 54.0f : h<280 ? 60.0f : 70.0f;
     for(int i=0;i<rows;++i) {
         float top=y+56+i*pitch; bool focused=!s.busy && i==s.focus;
@@ -189,11 +190,11 @@ static void PcApp(const UiState& s,float x,float y,float w,float h) {
 // Bottom card on the Settings tab: where the app keeps its files.
 static void Files(float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
-    Text(Small,x+28,y+18,Hex(Muted),"FILES NEXT TO THE XEX");
-    Text(Body,x+28,y+52,Hex(White),"FastFTP360.ini");
-    Text(Body,x+200,y+52,Hex(Muted),"Login and settings");
-    Text(Body,x+460,y+52,Hex(White),"FastFTP360.log");
-    Text(Body,x+640,y+52,Hex(Muted),"FTP activity");
+    Text(Small,x+28,y+12,Hex(Muted),"FILES NEXT TO THE XEX");
+    Text(Body,x+28,y+42,Hex(White),"FastFTP360.ini");
+    Text(Body,x+200,y+42,Hex(Muted),"Login and settings");
+    Text(Body,x+460,y+42,Hex(White),"FastFTP360.log");
+    Text(Body,x+640,y+42,Hex(Muted),"FTP activity");
 }
 
 // Bottom card: the latest completed results for the selected tab.
@@ -291,10 +292,15 @@ void DrawUi(const UiState& s) {
         Status(s,Left,184,744,240);
         Settings(s,Left+764,184,Right-Left-764,240);
         Transfers(s,Left,440,Right-Left,176);
+    } else if(s.tab==TabSettings) {
+        // Five settings: taller cards over a slimmer files card.
+        Status(s,Left,184,744,330);
+        Settings(s,Left+764,184,Right-Left-764,330);
+        Files(Left,530,Right-Left,84);
     } else {
         Status(s,Left,184,744,280);
         if(s.tab==TabNetwork) PcApp(s,Left+764,184,Right-Left-764,280); else Settings(s,Left+764,184,Right-Left-764,280);
-        if(s.tab==TabSettings) Files(Left,484,Right-Left,110); else Results(s,Left,484,Right-Left,110);
+        Results(s,Left,484,Right-Left,110);
     }
 
     Footer(s,628);
