@@ -63,6 +63,13 @@ typedef struct { WORD wVersion; } WSADATA;
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
 #define FILE_ATTRIBUTE_NORMAL 0x80
 #define FILE_FLAG_SEQUENTIAL_SCAN 0x08000000
+#define FILE_FLAG_NO_BUFFERING 0x20000000
+#define FILE_END 2
+#define INVALID_SET_FILE_POINTER ((DWORD)-1)
+#define NO_ERROR 0
+#define MEM_COMMIT 0x1000
+#define MEM_RELEASE 0x8000
+#define PAGE_READWRITE 0x04
 
 // Every HANDLE points at one of these; INVALID_HANDLE_VALUE never does.
 struct NbHandle {
@@ -71,6 +78,8 @@ struct NbHandle {
     pthread_mutex_t lock; pthread_cond_t changed; bool signaled, manual;
     pthread_t thread; DWORD (*start)(void*); void* argument;
     DIR* dir; char folder[600]; bool single;
+    // Opened with FILE_FLAG_NO_BUFFERING: reads and writes must be aligned.
+    bool unbuffered;
 };
 typedef NbHandle* HANDLE;
 #define INVALID_HANDLE_VALUE ((HANDLE)(-1L))
@@ -219,15 +228,22 @@ static inline BOOL CloseHandle(HANDLE h) {
     delete h; return TRUE;
 }
 
-static inline HANDLE CreateFile(const char* path,DWORD access,DWORD,void*,DWORD disposition,DWORD,void*) {
+static inline HANDLE CreateFile(const char* path,DWORD access,DWORD,void*,DWORD disposition,DWORD attributes,void*) {
     char native[600]; nb_path(path,native,sizeof(native));
     int flags=(access&GENERIC_WRITE) ? O_WRONLY : O_RDONLY;
     if(disposition==CREATE_ALWAYS) flags|=O_CREAT|O_TRUNC;
     int fd=open(native,flags,0644); if(fd<0) return INVALID_HANDLE_VALUE;
     struct stat st; if(fstat(fd,&st) || S_ISDIR(st.st_mode)) { close(fd); errno=EISDIR; return INVALID_HANDLE_VALUE; }
-    HANDLE h=nb_new(NbHandle::File); h->fd=fd; return h;
+    HANDLE h=nb_new(NbHandle::File); h->fd=fd; h->unbuffered=(attributes&FILE_FLAG_NO_BUFFERING)!=0; return h;
+}
+// Like Windows without the file cache: offset, length and buffer must be
+// whole 512-byte sectors.
+static inline bool nb_misaligned(HANDLE h,const void* data,DWORD count) {
+    if(!h->unbuffered || (!(count%512) && !(size_t(data)%512) && !(lseek(h->fd,0,SEEK_CUR)%512))) return false;
+    errno=EINVAL; return true;
 }
 static inline BOOL ReadFile(HANDLE h,void* data,DWORD count,DWORD* got,void*) {
+    if(nb_misaligned(h,data,count)) { *got=0; return FALSE; }
     DWORD total=0;
     while(total<count) {
         ssize_t n=read(h->fd,static_cast<char*>(data)+total,count-total);
@@ -238,6 +254,7 @@ static inline BOOL ReadFile(HANDLE h,void* data,DWORD count,DWORD* got,void*) {
     *got=total; return TRUE;
 }
 static inline BOOL WriteFile(HANDLE h,const void* data,DWORD count,DWORD* done,void*) {
+    if(nb_misaligned(h,data,count)) { *done=0; return FALSE; }
     DWORD total=0;
     while(total<count) {
         ssize_t n=write(h->fd,static_cast<const char*>(data)+total,count-total);
@@ -247,6 +264,14 @@ static inline BOOL WriteFile(HANDLE h,const void* data,DWORD count,DWORD* done,v
     *done=total; return TRUE;
 }
 static inline BOOL FlushFileBuffers(HANDLE h) { return fsync(h->fd)==0; }
+static inline DWORD SetFilePointer(HANDLE h,LONG distance,LONG* high,DWORD method) {
+    off_t at=lseek(h->fd,off_t(distance)+(high ? off_t(*high)*4294967296LL : 0),method==FILE_END ? SEEK_END : method==1 ? SEEK_CUR : SEEK_SET);
+    if(at<0) return INVALID_SET_FILE_POINTER;
+    errno=0; if(high) *high=LONG(at>>32);
+    return DWORD(at);
+}
+static inline void* VirtualAlloc(void*,size_t size,DWORD,DWORD) { void* p=NULL; return posix_memalign(&p,4096,size) ? NULL : p; }
+static inline BOOL VirtualFree(void* p,size_t,DWORD) { free(p); return TRUE; }
 static inline DWORD GetFileAttributes(const char* path) {
     char native[600]; nb_path(path,native,sizeof(native));
     struct stat st; if(stat(native,&st)) return DWORD(-1);

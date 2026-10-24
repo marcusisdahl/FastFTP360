@@ -71,7 +71,7 @@ int main(int argc,char** argv) {
     nb::UiState state; const char* scene=argc>2 ? argv[2] : "idle";
     strcpy_s(state.ip,"192.168.1.50");
     strcpy_s(state.buffers,"Startup default (64 KiB)"); strcpy_s(state.cpu,"Automatic");
-    strcpy_s(state.diskTarget,"HDD"); strcpy_s(state.diskBlock,"1 MiB"); strcpy_s(state.drawing,"Paused"); strcpy_s(state.speed,"Off"); strcpy_s(state.ftpUser,"xboxftp"); strcpy_s(state.ftpPassword,"xboxftp");
+    strcpy_s(state.diskTarget,"HDD"); strcpy_s(state.diskBlock,"1 MiB"); strcpy_s(state.drawing,"Paused"); strcpy_s(state.speed,"Off"); strcpy_s(state.diskIo,"Cached, 1 MiB"); strcpy_s(state.ftpUser,"xboxftp"); strcpy_s(state.ftpPassword,"xboxftp");
     state.upload=27.34; state.download=24.16;
     if(!strcmp(scene,"run")) {
         state.tab=nb::TabNetwork; state.armed=1; state.busy=1; state.phase=5; state.direction=1; state.rate=27.48; state.elapsed=6.4; state.mebibytes=175.9; state.streams=2;
@@ -99,7 +99,7 @@ int main(int argc,char** argv) {
         state.tab=nb::TabDisk; state.focus=0;
         strcpy_s(state.disk,"HDD, 1024 KiB blocks: write 57.52, read 57.21 MiB/s, all data checked");
     } else if(!strcmp(scene,"settings")) {
-        state.tab=nb::TabSettings; state.focus=2;
+        state.tab=nb::TabSettings; state.focus=4;
     } else { state.phase=0; state.download=0; }
     ImGui::GetIO().DeltaTime=1.0f/60;
     nb::DrawUi(state);

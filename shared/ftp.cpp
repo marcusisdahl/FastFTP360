@@ -17,39 +17,51 @@ enum { NameMax=255, PathMax=259, FatxNameMax=42 };
 volatile LONG NextDataPort=0,NextTemporary=0;
 
 // Overlaps disk and network: a helper thread writes behind (uploads) or reads
-// ahead (downloads) through two buffers that alternate with the socket side.
+// ahead (downloads) through two buffers of block bytes that alternate with the
+// socket side.
 struct Pump {
     HANDLE file,thread,filled[2],freed[2];
     unsigned char* buffer[2];
-    DWORD length[2],error;
-    bool writing;
+    DWORD block,length[2],error;
+    bool writing,uncached;
     volatile LONG stop,failed;
     int next;
+    // Uncached uploads: the buffer holding the last, shorter block, which the
+    // helper leaves for the caller to write through the cache; -1 for none.
+    int tail;
 };
 DWORD WINAPI PumpThread(void* context) {
     Pump& p=*static_cast<Pump*>(context);
+    bool last=false;
     for(int i=0;;i^=1) {
         WaitForSingleObject(p.writing ? p.filled[i] : p.freed[i],INFINITE);
         if(p.stop) break;
         DWORD done=0;
         if(p.writing) {
             if(!p.length[i]) break;
+            if(p.uncached && p.length[i]<p.block) { p.tail=i; break; }
             if(!WriteFile(p.file,p.buffer[i],p.length[i],&done,NULL) || done!=p.length[i]) {
                 p.error=GetLastError(); InterlockedExchange(&p.failed,1); SetEvent(p.freed[i]); break;
             }
             SetEvent(p.freed[i]);
         } else {
-            if(!ReadFile(p.file,p.buffer[i],FtpBuffer,&done,NULL)) { p.error=GetLastError(); InterlockedExchange(&p.failed,1); done=0; }
+            // A short read is the end of the file. Uncached reads must start on
+            // a sector, so none follows it.
+            if(!last && !ReadFile(p.file,p.buffer[i],p.block,&done,NULL)) { p.error=GetLastError(); InterlockedExchange(&p.failed,1); done=0; }
+            last=done<p.block;
             p.length[i]=done; SetEvent(p.filled[i]);
             if(!done) break;
         }
     }
     return 0;
 }
-bool StartPump(Pump& p,HANDLE file,bool writing) {
-    memset(&p,0,sizeof(p)); p.file=file; p.writing=writing;
+// diskBlock as for ServeFtp; the file must be opened to match.
+bool StartPump(Pump& p,HANDLE file,bool writing,int diskBlock) {
+    memset(&p,0,sizeof(p)); p.file=file; p.writing=writing; p.tail=-1;
+    p.uncached=diskBlock!=0; p.block=p.uncached ? DWORD(diskBlock) : DWORD(FtpBuffer);
     for(int i=0;i<2;++i) {
-        p.buffer[i]=static_cast<unsigned char*>(malloc(FtpBuffer));
+        // Page-aligned, as uncached I/O needs.
+        p.buffer[i]=static_cast<unsigned char*>(VirtualAlloc(NULL,p.block,MEM_COMMIT,PAGE_READWRITE));
         p.filled[i]=CreateEvent(NULL,FALSE,FALSE,NULL);
         p.freed[i]=CreateEvent(NULL,FALSE,TRUE,NULL);
         if(!p.buffer[i] || !p.filled[i] || !p.freed[i]) return false;
@@ -67,13 +79,13 @@ void EndPump(Pump& p) {
     for(int i=0;i<2;++i) {
         if(p.filled[i]) CloseHandle(p.filled[i]);
         if(p.freed[i]) CloseHandle(p.freed[i]);
-        free(p.buffer[i]);
+        if(p.buffer[i]) VirtualFree(p.buffer[i],0,MEM_RELEASE);
     }
     memset(&p,0,sizeof(p));
 }
 
 struct Shared {
-    const FtpRoot* roots; int rootCount; DWORD address; int socketBuffer,speedLimit;
+    const FtpRoot* roots; int rootCount; DWORD address; int socketBuffer,speedLimit,diskBlock;
     const char* user; const char* password;
     const FtpObserver* observer;
     volatile LONG active,finished;
@@ -451,7 +463,8 @@ void Session::Retrieve(const char* argument) {
     HANDLE file=INVALID_HANDLE_VALUE;
     if(null && (!size || Depth(path)!=2)) { Reply("550 Use a name like 256MB.bin in this folder."); return; }
     if(!null) {
-        file=CreateFile(native,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,NULL);
+        file=CreateFile(native,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,
+            FILE_FLAG_SEQUENTIAL_SCAN|(shared_.diskBlock ? FILE_FLAG_NO_BUFFERING : 0),NULL);
         if(file==INVALID_HANDLE_VALUE) { Reply("550 Cannot open the file."); return; }
     }
     Reply("150 Opening binary data connection.");
@@ -475,7 +488,7 @@ void Session::Retrieve(const char* argument) {
         }
     } else {
         Pump pump;
-        if(!StartPump(pump,file,false)) { ok=false; failure="451 Out of memory."; }
+        if(!StartPump(pump,file,false,shared_.diskBlock)) { ok=false; failure="451 Out of memory."; }
         while(ok) {
             int i=pump.next;
             while(WaitForSingleObject(pump.filled[i],100)==WAIT_TIMEOUT) if(Cancelled()) { ok=false; break; }
@@ -505,6 +518,16 @@ static void TemporaryName(const char* native,const char* suffix,char* out,size_t
     int folder=slash ? int(slash-native)+1 : 0;
     _snprintf_s(out,capacity,_TRUNCATE,"%.*sFastFTP360-%u.%s",folder,native,unsigned(InterlockedIncrement(&NextTemporary)),suffix);
 }
+// Appends data through the file cache: an uncached upload's last, shorter
+// block, since uncached writes take whole sectors. Reopens file for this.
+static bool AppendCached(HANDLE& file,const char* path,const void* data,DWORD length) {
+    CloseHandle(file);
+    file=CreateFile(path,GENERIC_WRITE,0,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file==INVALID_HANDLE_VALUE) return false;
+    LONG high=0; DWORD written=0;
+    if(SetFilePointer(file,0,&high,FILE_END)==INVALID_SET_FILE_POINTER && GetLastError()!=NO_ERROR) return false;
+    return WriteFile(file,data,length,&written,NULL) && written==length;
+}
 // Puts the finished upload in place of the old file. The old file is moved
 // aside first and moved back if that fails, so one of them always survives.
 static bool ReplaceWithUpload(const char* temporary,const char* native) {
@@ -530,7 +553,8 @@ void Session::Store(const char* argument) {
         // Replacing a file: receive into a temporary file next to it, so a
         // failed or cancelled upload leaves the old file as it was.
         if(attributes!=DWORD(-1)) TemporaryName(native,"tmp",temporary,sizeof(temporary));
-        file=CreateFile(temporary[0] ? temporary : native,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+        file=CreateFile(temporary[0] ? temporary : native,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL|(shared_.diskBlock ? FILE_FLAG_NO_BUFFERING : 0),NULL);
         if(file==INVALID_HANDLE_VALUE) {
             Reply(strlen(name)>size_t(FatxNameMax) ? "553 Cannot create the file. Xbox drives allow names of up to 42 characters." : "553 Cannot create the file.");
             return;
@@ -560,14 +584,14 @@ void Session::Store(const char* argument) {
         if(ok && ControlAborted()) ok=false;
     } else {
         Pump pump; bool eof=false;
-        if(!StartPump(pump,file,true)) { ok=false; failure="451 Out of memory."; }
+        if(!StartPump(pump,file,true,shared_.diskBlock)) { ok=false; failure="451 Out of memory."; }
         while(ok && !eof) {
             int i=pump.next;
             while(WaitForSingleObject(pump.freed[i],100)==WAIT_TIMEOUT) if(Cancelled() || pump.failed) { ok=false; break; }
             if(!ok || pump.failed) { ok=false; break; }
             DWORD filled=0;
-            while(filled<FtpBuffer) {
-                int got=Receive(data,reinterpret_cast<char*>(pump.buffer[i])+filled,int(FtpBuffer-filled),DataIdleSeconds,true);
+            while(filled<pump.block) {
+                int got=Receive(data,reinterpret_cast<char*>(pump.buffer[i])+filled,int(pump.block-filled),DataIdleSeconds,true);
                 if(got<0) { ok=false; break; }
                 if(!got) { eof=true; break; }
                 filled+=got; bytes+=got;
@@ -585,9 +609,12 @@ void Session::Store(const char* argument) {
         }
         if(ok) WaitForSingleObject(pump.thread,INFINITE);
         if(pump.failed) { ok=false; failure="452 Write error on the Xbox drive. Is it full?"; }
+        if(ok && pump.tail>=0 && !AppendCached(file,written,pump.buffer[pump.tail],pump.length[pump.tail])) {
+            ok=false; failure="452 Write error on the Xbox drive. Is it full?";
+        }
         EndPump(pump);
         if(ok && !FlushFileBuffers(file)) { ok=false; failure="452 Write error on the Xbox drive. Is it full?"; }
-        CloseHandle(file);
+        if(file!=INVALID_HANDLE_VALUE) CloseHandle(file);
         // A client that cancels may close the data connection just before it
         // hangs up or sends ABOR; by the time the file is flushed, that is in.
         if(ok && ControlAborted()) ok=false;
@@ -706,9 +733,9 @@ DWORD WINAPI SessionThread(void* context) {
 }
 
 bool ServeFtp(SOCKET listener,const FtpRoot* roots,int rootCount,DWORD address,int socketBuffer,
-              int speedLimit,int processor,int maxSessions,const char* user,const char* password,
+              int speedLimit,int processor,int diskBlock,int maxSessions,const char* user,const char* password,
               const FtpObserver& observer,char* error,size_t capacity) {
-    Shared shared={roots,rootCount,address,socketBuffer,speedLimit,user,password ? password : "",&observer,0,0};
+    Shared shared={roots,rootCount,address,socketBuffer,speedLimit,diskBlock,user,password ? password : "",&observer,0,0};
     InitializeCriticalSection(&shared.paceLock); shared.paceNext=0;
     HANDLE threads[64]={0}; int started=0; bool ok=true;
     while(!(observer.cancelled && observer.cancelled(observer.context))) {

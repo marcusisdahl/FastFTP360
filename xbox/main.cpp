@@ -29,6 +29,12 @@ static int CpuChoice=0;
 // console with a stock 20 GB drive froze at 20+ MiB/s but not at 14.
 static const int SpeedChoices[]={0,12,16,20};
 static int SpeedChoice=0;
+// How FTP reads and writes Xbox files: through the file cache, or uncached in
+// fixed blocks (ServeFtp's diskBlock). key is the FastFTP360.ini value.
+struct DiskIo { int block; const char* key; const char* label; };
+static const DiskIo DiskIoChoices[]={{0,"cached","Cached, 1 MiB"},{1048576,"uncached-1m","Uncached, 1 MiB"},
+    {262144,"uncached-256k","Uncached, 256 KiB"}};
+static int DiskIoChoice=0;
 // Whether to keep drawing while data moves. Off by default: drawing during
 // Xbox sends has preceded console crashes, so the screen is held instead.
 static bool DrawDuringTransfers=false;
@@ -149,6 +155,8 @@ static void LoadSettings() {
         }
         if(nb::FindSetting(text,"speed",value,sizeof(value))
             && (choice=ChoiceOf(SpeedChoices,sizeof(SpeedChoices)/sizeof(SpeedChoices[0]),value))>=0) SpeedChoice=choice;
+        if(nb::FindSetting(text,"disk",value,sizeof(value)))
+            for(int i=0;i<int(sizeof(DiskIoChoices)/sizeof(DiskIoChoices[0]));++i) if(!_stricmp(value,DiskIoChoices[i].key)) DiskIoChoice=i;
     }
     CloseHandle(file);
 }
@@ -156,8 +164,8 @@ static bool SaveSettings() {
     char text[320],cpu[8]; nb::FormatFtpLogin(text,sizeof(text),FtpLoginRequired,FtpUser,FtpPassword);
     if(CpuChoice) _snprintf_s(cpu,sizeof(cpu),_TRUNCATE,"%d",CpuChoice-1); else strcpy_s(cpu,"auto");
     const size_t login=strlen(text);
-    _snprintf_s(text+login,sizeof(text)-login,_TRUNCATE,"buffers=%d\r\ncpu=%s\r\ndrawing=%s\r\nspeed=%d\r\n",
-        BufferChoices[BufferChoice],cpu,DrawDuringTransfers ? "live" : "paused",SpeedChoices[SpeedChoice]);
+    _snprintf_s(text+login,sizeof(text)-login,_TRUNCATE,"buffers=%d\r\ncpu=%s\r\ndrawing=%s\r\nspeed=%d\r\ndisk=%s\r\n",
+        BufferChoices[BufferChoice],cpu,DrawDuringTransfers ? "live" : "paused",SpeedChoices[SpeedChoice],DiskIoChoices[DiskIoChoice].key);
     HANDLE file=CreateFile(SettingsFile,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) return false;
     DWORD written=0; bool ok=WriteFile(file,text,DWORD(strlen(text)),&written,NULL) && written==strlen(text);
@@ -188,6 +196,7 @@ static void DescribeSettings() {
     if(CpuChoice) _snprintf_s(State.cpu,sizeof(State.cpu),_TRUNCATE,"Hardware thread %d",CpuChoice-1); else strcpy_s(State.cpu,"Automatic");
     if(SpeedChoices[SpeedChoice]) _snprintf_s(State.speed,sizeof(State.speed),_TRUNCATE,"%d MiB/s",SpeedChoices[SpeedChoice]);
     else strcpy_s(State.speed,"Off");
+    strcpy_s(State.diskIo,DiskIoChoices[DiskIoChoice].label);
     strcpy_s(State.diskTarget,DiskTargets[DiskChoice].name);
     if(DiskBlocks[DiskBlockChoice]>=1048576) _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u MiB",DiskBlocks[DiskBlockChoice]/1048576);
     else _snprintf_s(State.diskBlock,sizeof(State.diskBlock),_TRUNCATE,"%u KiB",DiskBlocks[DiskBlockChoice]/1024);
@@ -197,7 +206,8 @@ static void DescribeSettings() {
 // Steps the focused setting on the current tab by one choice (D-pad left/right).
 static void ChangeSetting(int tab,int row,int step) {
     const int buffers=sizeof(BufferChoices)/sizeof(BufferChoices[0]),targets=sizeof(DiskTargets)/sizeof(DiskTargets[0]),
-        blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]),speeds=sizeof(SpeedChoices)/sizeof(SpeedChoices[0]);
+        blocks=sizeof(DiskBlocks)/sizeof(DiskBlocks[0]),speeds=sizeof(SpeedChoices)/sizeof(SpeedChoices[0]),
+        diskIos=sizeof(DiskIoChoices)/sizeof(DiskIoChoices[0]);
     if(tab==nb::TabFtp) { FtpLoginRequired=!FtpLoginRequired; SaveSettings(); }
     else if(tab==nb::TabDisk) {
         if(row==0) DiskChoice=(DiskChoice+targets+step)%targets; else DiskBlockChoice=(DiskBlockChoice+blocks+step)%blocks;
@@ -207,7 +217,8 @@ static void ChangeSetting(int tab,int row,int step) {
         if(row==0) BufferChoice=(BufferChoice+buffers+step)%buffers;
         else if(row==1) CpuChoice=(CpuChoice+7+step)%7;
         else if(row==2) DrawDuringTransfers=!DrawDuringTransfers;
-        else SpeedChoice=(SpeedChoice+speeds+step)%speeds;
+        else if(row==3) SpeedChoice=(SpeedChoice+speeds+step)%speeds;
+        else DiskIoChoice=(DiskIoChoice+diskIos+step)%diskIos;
         SaveSettings();
     }
 }
@@ -463,11 +474,11 @@ static DWORD WINAPI FtpThread(void*) {
         nb::FtpObserver observer={NULL,IsCancelled,FtpProgress,FtpLog,FtpStarting};
         char line[300];
         const BYTE* ip=reinterpret_cast<const BYTE*>(&xnaddr.ina);
-        _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP server started on %u.%u.%u.%u port 21, login %s, speed limit %s, worker CPU %s. %s",
-            ip[0],ip[1],ip[2],ip[3],FtpLoginRequired ? FtpUser : "off",State.speed,State.cpu,folders);
+        _snprintf_s(line,sizeof(line),_TRUNCATE,"FTP server started on %u.%u.%u.%u port 21, login %s, speed limit %s, worker CPU %s, disk I/O %s. %s",
+            ip[0],ip[1],ip[2],ip[3],FtpLoginRequired ? FtpUser : "off",State.speed,State.cpu,State.diskIo,folders);
         WriteLog(line);
-        if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],SpeedChoices[SpeedChoice],CpuChoice-1,0,
-            FtpLoginRequired ? FtpUser : NULL,FtpPassword,observer,error,sizeof(error))) ready=false;
+        if(!nb::ServeFtp(listener,roots,count,xnaddr.ina.s_addr,BufferChoices[BufferChoice],SpeedChoices[SpeedChoice],CpuChoice-1,
+            DiskIoChoices[DiskIoChoice].block,0,FtpLoginRequired ? FtpUser : NULL,FtpPassword,observer,error,sizeof(error))) ready=false;
     }
     if(listener!=INVALID_SOCKET) closesocket(listener);
     for(int i=0;i<FtpDriveCount;++i) if(linked[i]) UnlinkDrive(FtpLinks[i]);
