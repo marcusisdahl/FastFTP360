@@ -93,8 +93,8 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
             {"Socket buffers for FTP and the network test.","Bigger is not always faster, and the Xbox may","refuse them. Startup default suits most people."},
             {"The hardware thread for network test streams","and FTP sessions. USB network work runs on","thread 2. Automatic suits most people."},
             {"Paused holds the screen while data moves.","Live drawing during Xbox sends has crashed the","console before. Keep Paused unless testing it."},
-            {"Caps FTP uploads and downloads together.","Try 12 or 16 if the console freezes during","fast transfers. Off is fastest."},
-            {"How FTP reads and writes Xbox drives. Cached is","the tested default. Uncached skips the file","cache; try it if fast transfers freeze."}};
+            {"Caps FTP transfers, or only downloads (Xbox to","PC). Try 16 if the console freezes during fast","transfers. Off is fastest."},
+            {"How FTP reads and writes Xbox drives. Uncached","256 KiB skips the file cache and uploaded","faster in tests. Cached is the default."}};
         for(int i=0;i<3;++i) lines[i]=help[s.focus>=0 && s.focus<5 ? s.focus : 0][i];
     } else if(s.tab==TabFtp) {
         static const char* names[]={"FTP server","FTP server on","Receiving upload","Sending download"};

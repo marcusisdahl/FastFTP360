@@ -85,7 +85,7 @@ void EndPump(Pump& p) {
 }
 
 struct Shared {
-    const FtpRoot* roots; int rootCount; DWORD address; int socketBuffer,speedLimit,diskBlock;
+    const FtpRoot* roots; int rootCount; DWORD address; int socketBuffer,speedLimit,diskBlock; bool downloadsOnly;
     const char* user; const char* password;
     const FtpObserver* observer;
     volatile LONG active,finished;
@@ -139,16 +139,18 @@ private:
     // (the Xbox pauses drawing) before the first byte moves.
     void Starting(const char* operation,const char* name,const char* path) {
         const char* kind=operation[0]=='S' ? "Upload" : "Download";
-        if(shared_.speedLimit) Log("%s %s started, limited to %d MiB/s",kind,path,shared_.speedLimit);
+        if(Limit(operation)) Log("%s %s started, limited to %d MiB/s",kind,path,Limit(operation));
         else Log("%s %s started",kind,path);
         if(shared_.observer->starting) shared_.observer->starting(shared_.observer->context,operation,name);
     }
-    // Holds all transfers together to the speed limit. Each piece of data
-    // books the time it takes at that rate after the bookings before it, and
-    // the session waits until its booking ends. A pause of more than 0.1 s
+    // The speed limit for a STOR or RETR; 0 is none.
+    int Limit(const char* operation) const { return operation[0]=='S' && shared_.downloadsOnly ? 0 : shared_.speedLimit; }
+    // Holds all limited transfers together to the speed limit. Each piece of
+    // data books the time it takes at that rate after the bookings before it,
+    // and the session waits until its booking ends. A pause of more than 0.1 s
     // earns no credit, so a new transfer cannot burst. False if stopped.
-    bool Pace(int count) {
-        if(!shared_.speedLimit) return true;
+    bool Pace(const char* operation,int count) {
+        if(!Limit(operation)) return true;
         EnterCriticalSection(&shared_.paceLock);
         const double now=Now();
         if(shared_.paceNext<now-0.1) shared_.paceNext=now;
@@ -481,7 +483,7 @@ void Session::Retrieve(const char* argument) {
             while(ok && bytes<size) {
                 int count=int(size-bytes<U64(Chunk) ? size-bytes : Chunk);
                 ok=SendAll(data,reinterpret_cast<const char*>(block),count,true);
-                if(ok) { bytes+=count; ok=Pace(count); }
+                if(ok) { bytes+=count; ok=Pace("RETR",count); }
                 if(Now()-update>=0.25) { update=Now(); Progress("RETR",name,bytes,update-begin,false,true); }
             }
             free(block);
@@ -500,7 +502,7 @@ void Session::Retrieve(const char* argument) {
             for(DWORD left=pump.length[i];ok && left;) {
                 const int count=int(left>DWORD(Chunk) ? DWORD(Chunk) : left);
                 ok=SendAll(data,piece,count,true);
-                if(ok) { bytes+=count; piece+=count; left-=count; ok=Pace(count); }
+                if(ok) { bytes+=count; piece+=count; left-=count; ok=Pace("RETR",count); }
             }
             SetEvent(pump.freed[i]); pump.next^=1;
             if(Now()-update>=0.25) { update=Now(); Progress("RETR",name,bytes,update-begin,false,true); }
@@ -575,7 +577,7 @@ void Session::Store(const char* argument) {
         if(!sink) ok=false;
         for(;ok;) {
             int got=Receive(data,sink,Chunk*4,DataIdleSeconds,true);
-            if(got<0) ok=false; else if(!got) break; else { bytes+=got; ok=Pace(got); }
+            if(got<0) ok=false; else if(!got) break; else { bytes+=got; ok=Pace("STOR",got); }
             if(Now()-update>=0.25) { update=Now(); Progress("STOR",name,bytes,update-begin,false,true); }
         }
         free(sink);
@@ -595,7 +597,7 @@ void Session::Store(const char* argument) {
                 if(got<0) { ok=false; break; }
                 if(!got) { eof=true; break; }
                 filled+=got; bytes+=got;
-                if(!Pace(got)) { ok=false; break; }
+                if(!Pace("STOR",got)) { ok=false; break; }
                 if(Now()-update>=0.25) { update=Now(); Progress("STOR",name,bytes,update-begin,false,true); }
             }
             if(!ok) break;
@@ -733,9 +735,9 @@ DWORD WINAPI SessionThread(void* context) {
 }
 
 bool ServeFtp(SOCKET listener,const FtpRoot* roots,int rootCount,DWORD address,int socketBuffer,
-              int speedLimit,int processor,int diskBlock,int maxSessions,const char* user,const char* password,
+              int speedLimit,bool downloadsOnly,int processor,int diskBlock,int maxSessions,const char* user,const char* password,
               const FtpObserver& observer,char* error,size_t capacity) {
-    Shared shared={roots,rootCount,address,socketBuffer,speedLimit,diskBlock,user,password ? password : "",&observer,0,0};
+    Shared shared={roots,rootCount,address,socketBuffer,speedLimit,diskBlock,downloadsOnly,user,password ? password : "",&observer,0,0};
     InitializeCriticalSection(&shared.paceLock); shared.paceNext=0;
     HANDLE threads[64]={0}; int started=0; bool ok=true;
     while(!(observer.cancelled && observer.cancelled(observer.context))) {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Runs the SAME FTP server source on Windows loopback for protocol tests.
-// Usage: ftp-host [--speed <MiB/s>] [--disk <uncached block bytes>] <port> <folder served as /HDD> <sessions> [user password]
+// Usage: ftp-host [--speed <MiB/s> | --download-speed <MiB/s>] [--disk <uncached block bytes>]
+//                 <port> <folder served as /HDD> <sessions> [user password]
 //        ftp-host --login-file <path>   prints the login the Xbox would read from it
 //        ftp-host --setting <path> <key>   prints that setting's value from the file
 #include "../shared/ftp.h"
@@ -33,9 +34,10 @@ int main(int argc,char** argv) {
         if(nb::FindSetting(text,argv[3],value,sizeof(value))) printf("SETTING [%s]\n",value); else printf("NO SETTING\n");
         return 0;
     }
-    int speed=0,disk=0;
+    int speed=0,disk=0; bool downloadsOnly=false;
     while(argc>=3 && !strncmp(argv[1],"--",2)) {
         if(!strcmp(argv[1],"--speed")) speed=atoi(argv[2]);
+        else if(!strcmp(argv[1],"--download-speed")) { speed=atoi(argv[2]); downloadsOnly=true; }
         else if(!strcmp(argv[1],"--disk")) disk=atoi(argv[2]);
         else return 1;
         argv+=2; argc-=2;
@@ -53,7 +55,7 @@ int main(int argc,char** argv) {
     printf("READY %s\n",argv[1]); fflush(stdout);
     Started=nb::Now();
     // No fallback address: passive replies must use the address the client reached.
-    bool ok=nb::ServeFtp(listener,roots,2,0,0,speed,-1,disk,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));
+    bool ok=nb::ServeFtp(listener,roots,2,0,0,speed,downloadsOnly,-1,disk,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));
     printf(ok ? "STOPPED\n" : "ERROR %s\n",error);
     closesocket(listener); WSACleanup(); return ok ? 0 : 3;
 }

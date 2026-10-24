@@ -47,9 +47,10 @@ def pattern(seed, count):
 
 
 @contextlib.contextmanager
-def server(folder, sessions=1, credentials=(), speed=0, disk=0):
+def server(folder, sessions=1, credentials=(), speed=0, download_speed=0, disk=0):
     port = free_port()
-    limit = (["--speed", str(speed)] if speed else []) + (["--disk", str(disk)] if disk else [])
+    limit = ((["--speed", str(speed)] if speed else []) + (["--download-speed", str(download_speed)] if download_speed else [])
+             + (["--disk", str(disk)] if disk else []))
     process = subprocess.Popen([str(HOST), *limit, str(port), str(folder), str(sessions), *credentials],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **WINDOWLESS)
     try:
@@ -168,6 +169,23 @@ with tempfile.TemporaryDirectory() as temp:
         output = host.communicate(timeout=10)[0]
         check("the limit holds two parallel uploads together, 8 MiB each in about 2 s", 1.9 <= both < 6 and output.count("DONE STOR parallel") == 2)
         check("the log says when a limited transfer starts", "Upload /NULL/limited.bin started, limited to 8 MiB/s" in output)
+
+    with server(served, download_speed=8) as (port, host):
+        ftp = login(port)
+        begin = time.time()
+        ftp.storbinary("STOR /NULL/fast.bin", io.BytesIO(bytes(16 * MIB)), blocksize=MIB)
+        up = time.time() - begin
+        begin = time.time()
+        limited = bytearray()
+        ftp.retrbinary("RETR /NULL/16MB.bin", limited.extend)
+        down = time.time() - begin
+        ftp.quit()
+        lines = host.communicate(timeout=10)[0].splitlines()
+        check("a downloads-only limit of 8 MiB/s holds a 16 MiB download to about 2 s and leaves uploads alone",
+              up < 1.5 and 1.9 <= down < 6 and len(limited) == 16 * MIB)
+        check("the log shows the limit on downloads only",
+              any(line.endswith("  Upload /NULL/fast.bin started") for line in lines)
+              and any(line.endswith("  Download /NULL/16MB.bin started, limited to 8 MiB/s") for line in lines))
 
     # Uncached disk I/O writes whole blocks and the shorter last one through the
     # cache. Windows, and the Linux shim, refuse unaligned uncached reads and writes.
