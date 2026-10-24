@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Runs the SAME FTP server source on Windows loopback for protocol tests.
-// Usage: ftp-host <port> <folder served as /HDD> <sessions> [user password]
+// Usage: ftp-host [--speed <MiB/s>] <port> <folder served as /HDD> <sessions> [user password]
 //        ftp-host --login-file <path>   prints the login the Xbox would read from it
+//        ftp-host --setting <path> <key>   prints that setting's value from the file
 #include "../shared/ftp.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,7 @@ static void Progress(void*,const char* operation,const char* file,nb::U64 bytes,
     if(done) { printf("%s %s %s bytes=%llu seconds=%.3f\n",ok ? "DONE" : "FAILED",operation,file,bytes,seconds); fflush(stdout); }
 }
 static void Log(void*,const char* line) { printf("LOG %s\n",line); fflush(stdout); }
+static void Starting(void*,const char* operation,const char* file) { printf("START %s %s\n",operation,file); fflush(stdout); }
 int main(int argc,char** argv) {
     if(argc==3 && !strcmp(argv[1],"--login-file")) {
         char text[512]={0}; FILE* file=NULL;
@@ -25,6 +27,14 @@ int main(int argc,char** argv) {
         printf("LOGIN %s %s %s %s\n",required ? "on" : "off",user,password,same ? "roundtrip" : "mismatch");
         return 0;
     }
+    if(argc==4 && !strcmp(argv[1],"--setting")) {
+        char text[512]={0},value[16]; FILE* file=NULL;
+        if(fopen_s(&file,argv[2],"rb")==0) { text[fread(text,1,sizeof(text)-1,file)]=0; fclose(file); }
+        if(nb::FindSetting(text,argv[3],value,sizeof(value))) printf("SETTING [%s]\n",value); else printf("NO SETTING\n");
+        return 0;
+    }
+    int speed=0;
+    if(argc>=5 && !strcmp(argv[1],"--speed")) { speed=atoi(argv[2]); argv+=2; argc-=2; }
     if(argc<4) return 1;
     WSADATA wsa; if(WSAStartup(MAKEWORD(2,2),&wsa)) return 1;
     SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
@@ -34,11 +44,11 @@ int main(int argc,char** argv) {
     address.sin_port=htons(u_short(atoi(argv[1])));
     if(bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address)) || listen(listener,8)) return 2;
     const nb::FtpRoot roots[]={{"HDD",argv[2]},{"NULL",NULL}};
-    nb::FtpObserver observer={NULL,Cancelled,Progress,Log};
+    nb::FtpObserver observer={NULL,Cancelled,Progress,Log,Starting};
     printf("READY %s\n",argv[1]); fflush(stdout);
     Started=nb::Now();
     // No fallback address: passive replies must use the address the client reached.
-    bool ok=nb::ServeFtp(listener,roots,2,0,0,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));
+    bool ok=nb::ServeFtp(listener,roots,2,0,0,speed,-1,atoi(argv[3]),argc>5 ? argv[4] : NULL,argc>5 ? argv[5] : NULL,observer,error,sizeof(error));
     printf(ok ? "STOPPED\n" : "ERROR %s\n",error);
     closesocket(listener); WSACleanup(); return ok ? 0 : 3;
 }

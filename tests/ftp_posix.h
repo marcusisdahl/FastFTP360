@@ -120,6 +120,11 @@ static inline BOOL QueryPerformanceFrequency(LARGE_INTEGER* f) { f->QuadPart=100
 static inline LONG InterlockedIncrement(volatile LONG* p) { return __sync_add_and_fetch(p,1); }
 static inline LONG InterlockedDecrement(volatile LONG* p) { return __sync_sub_and_fetch(p,1); }
 static inline LONG InterlockedExchange(volatile LONG* p,LONG v) { return __sync_lock_test_and_set(p,v); }
+typedef pthread_mutex_t CRITICAL_SECTION;
+static inline void InitializeCriticalSection(CRITICAL_SECTION* c) { pthread_mutex_init(c,NULL); }
+static inline void DeleteCriticalSection(CRITICAL_SECTION* c) { pthread_mutex_destroy(c); }
+static inline void EnterCriticalSection(CRITICAL_SECTION* c) { pthread_mutex_lock(c); }
+static inline void LeaveCriticalSection(CRITICAL_SECTION* c) { pthread_mutex_unlock(c); }
 
 // MSVC string functions. Unlike MSVC, the checked copies abort the test
 // program when the destination is too small, which is what the Xbox CRT's
@@ -184,11 +189,14 @@ static inline void* nb_thread(void* context) {
     pthread_mutex_lock(&h->lock); h->signaled=true; h->manual=true; pthread_cond_broadcast(&h->changed); pthread_mutex_unlock(&h->lock);
     return NULL;
 }
+// Threads start at once; CREATE_SUSPENDED is accepted and ResumeThread does nothing.
+#define CREATE_SUSPENDED 0x4u
 static inline HANDLE CreateThread(void*,size_t,DWORD (*start)(void*),void* argument,DWORD,DWORD*) {
     HANDLE h=nb_new(NbHandle::Thread); h->start=start; h->argument=argument; h->manual=true;
     if(pthread_create(&h->thread,NULL,nb_thread,h)) { delete h; return NULL; }
     return h;
 }
+static inline DWORD ResumeThread(HANDLE) { return 0; }
 static inline DWORD WaitForSingleObject(HANDLE h,DWORD milliseconds) {
     timespec until; clock_gettime(CLOCK_REALTIME,&until);
     until.tv_sec+=milliseconds/1000; until.tv_nsec+=long(milliseconds%1000)*1000000L;

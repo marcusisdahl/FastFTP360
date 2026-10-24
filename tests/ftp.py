@@ -12,6 +12,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,9 +47,10 @@ def pattern(seed, count):
 
 
 @contextlib.contextmanager
-def server(folder, sessions=1, credentials=()):
+def server(folder, sessions=1, credentials=(), speed=0):
     port = free_port()
-    process = subprocess.Popen([str(HOST), str(port), str(folder), str(sessions), *credentials],
+    limit = ["--speed", str(speed)] if speed else []
+    process = subprocess.Popen([str(HOST), *limit, str(port), str(folder), str(sessions), *credentials],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **WINDOWLESS)
     try:
         ready = []
@@ -132,6 +134,40 @@ with tempfile.TemporaryDirectory() as temp:
         ftp.quit()
         output = host.communicate(timeout=10)[0]
         check("server reports completed transfers and stops", "DONE STOR big.bin bytes=%d" % len(payload) in output and "STOPPED" in output)
+        lines = output.splitlines()
+        starts = [line for line in lines if line.startswith("START ")]
+        ends = [line for line in lines if line.startswith(("DONE ", "FAILED "))]
+        check("every transfer is announced before data moves and ends once",
+              len(starts) == len(ends) and lines.index("START STOR big.bin") < next(i for i, line in enumerate(lines) if line.startswith("DONE STOR big.bin")))
+
+    with server(served, sessions=3, speed=8) as (port, host):
+        ftp = login(port)
+        begin = time.time()
+        ftp.storbinary("STOR /NULL/limited.bin", io.BytesIO(bytes(16 * MIB)), blocksize=MIB)
+        up = time.time() - begin
+        begin = time.time()
+        limited = bytearray()
+        ftp.retrbinary("RETR /NULL/16MB.bin", limited.extend)
+        down = time.time() - begin
+        ftp.quit()
+        check("an 8 MiB/s speed limit holds 16 MiB up and down to about 2 s each",
+              1.9 <= up < 6 and 1.9 <= down < 6 and len(limited) == 16 * MIB)
+
+        def limited_upload(index):
+            client = login(port)
+            client.storbinary("STOR /NULL/parallel%d.bin" % index, io.BytesIO(bytes(8 * MIB)), blocksize=MIB)
+            client.quit()
+
+        begin = time.time()
+        uploads = [threading.Thread(target=limited_upload, args=(i,)) for i in range(2)]
+        for upload in uploads:
+            upload.start()
+        for upload in uploads:
+            upload.join(30)
+        both = time.time() - begin
+        output = host.communicate(timeout=10)[0]
+        check("the limit holds two parallel uploads together, 8 MiB each in about 2 s", 1.9 <= both < 6 and output.count("DONE STOR parallel") == 2)
+        check("the log says when a limited transfer starts", "Upload /NULL/limited.bin started, limited to 8 MiB/s" in output)
 
     with server(served, sessions=3) as (port, host):
         results = []
@@ -190,9 +226,9 @@ with tempfile.TemporaryDirectory() as temp:
         ftp.quit()
         output = host.communicate(timeout=10)[0]
         log = [line[4:] for line in output.splitlines() if line.startswith("LOG ")]
-        expected = ["Connected", "Logged in as marcus", "Upload /HDD/log.bin, 5 bytes in", "Renamed /HDD/log.bin to /HDD/log2.bin",
+        expected = ["Connected", "Logged in as marcus", "Upload /HDD/log.bin started", "Upload /HDD/log.bin, 5 bytes in", "Renamed /HDD/log.bin to /HDD/log2.bin",
                     "Deleted /HDD/log2.bin", "Disconnected"]
-        check("the log records login, upload, rename, delete and disconnect with the client address",
+        check("the log records login, upload start and end, rename, delete and disconnect with the client address",
               len(log) == len(expected) and all(line.startswith("127.0.0.1  " + text) for line, text in zip(log, expected)))
 
     class Raw:
@@ -365,5 +401,20 @@ with tempfile.TemporaryDirectory() as temp:
           login_file("login=off\r\nuser=marcus\r\npassword=S3cret!=#\r\n") == ["off", "marcus", "S3cret!=#", "roundtrip"])
     check("invalid settings are ignored",
           login_file("user=has space\npassword=\nlogin=maybe\nuser=" + "x" * 24 + "\n") == ["on", "xboxftp", "xboxftp", "roundtrip"])
+
+    def setting(text, key):
+        path = Path(temp) / "FastFTP360.ini"
+        path.write_bytes(text.encode("latin-1"))
+        return subprocess.run([str(HOST), "--setting", str(path), key],
+                              capture_output=True, text=True, timeout=10).stdout.strip()
+
+    saved = "login=on\r\nuser=xboxftp\r\npassword=xboxftp\r\nbuffers=0\r\ncpu=auto\r\ndrawing=paused\r\nspeed=16\r\n"
+    check("the Xbox settings lines are found, the last one wins and keys ignore case",
+          setting(saved, "speed") == "SETTING [16]" and setting(saved, "CPU") == "SETTING [auto]"
+          and setting("speed=12\nspeed=20", "speed") == "SETTING [20]" and setting("speed=", "speed") == "SETTING []")
+    check("other keys, missing keys and values too long for the Xbox are not found",
+          setting("speedy=12\nspeed 16\n", "speed") == "NO SETTING" and setting(saved, "disk") == "NO SETTING"
+          and setting("speed=12\nspeed=" + "1" * 16, "speed") == "SETTING [12]")
+    check("the login is still read from a file with settings lines", login_file(saved) == ["on", "xboxftp", "xboxftp", "roundtrip"])
 
 print("%d FTP checks passed. Console execution remains untested." % passed)

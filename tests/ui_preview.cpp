@@ -71,7 +71,7 @@ int main(int argc,char** argv) {
     nb::UiState state; const char* scene=argc>2 ? argv[2] : "idle";
     strcpy_s(state.ip,"192.168.1.50");
     strcpy_s(state.buffers,"Startup default (64 KiB)"); strcpy_s(state.cpu,"Automatic");
-    strcpy_s(state.diskTarget,"HDD"); strcpy_s(state.diskBlock,"1 MiB"); strcpy_s(state.drawing,"Paused"); strcpy_s(state.ftpUser,"xboxftp"); strcpy_s(state.ftpPassword,"xboxftp");
+    strcpy_s(state.diskTarget,"HDD"); strcpy_s(state.diskBlock,"1 MiB"); strcpy_s(state.drawing,"Paused"); strcpy_s(state.speed,"Off"); strcpy_s(state.ftpUser,"xboxftp"); strcpy_s(state.ftpPassword,"xboxftp");
     state.upload=27.34; state.download=24.16;
     if(!strcmp(scene,"run")) {
         state.tab=nb::TabNetwork; state.armed=1; state.busy=1; state.phase=5; state.direction=1; state.rate=27.48; state.elapsed=6.4; state.mebibytes=175.9; state.streams=2;
@@ -79,7 +79,7 @@ int main(int argc,char** argv) {
         state.tab=nb::TabDisk; state.busy=1; state.diskPhase=1; state.diskTotal=256; state.mebibytes=96; state.elapsed=3.1; state.rate=30.97;
         strcpy_s(state.disk,"USB 0, 64 KiB blocks: write 8.52, read 24.10 MiB/s, all data checked");
     } else if(!strcmp(scene,"ftp")) {
-        state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=2; state.mebibytes=812.5; state.elapsed=31.2; state.rate=26.04;
+        state.tab=nb::TabFtp; state.armed=1; state.busy=1; state.ftpPhase=2; state.ftpActive=1; state.mebibytes=812.5; state.elapsed=31.2; state.rate=26.04;
         strcpy_s(state.message,"Folders: Game Hdd1 HddX SysExt System Usb0 USBMU0 USBMUCache0");
         strcpy_s(state.ftp,"Upload, 1024.0 MiB in 41.3 s: 24.79 MiB/s");
         static const nb::UiTransfer recent[]={{"Halo 3 - Disc 1 (Title Update 12, all DLC included).iso",7120.4,27.48,1,1},

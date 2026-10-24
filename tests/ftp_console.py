@@ -105,11 +105,28 @@ def wait_until(condition, seconds=15):
     return condition()
 
 
+class Meter:
+    """Prints a line every 64 MiB, so a console that stops shows where."""
+
+    def __init__(self, label):
+        self.label, self.bytes, self.begin, self.next = label, 0, time.time(), 64 * MIB
+
+    def add(self, count):
+        self.bytes += count
+        while self.bytes >= self.next:
+            seconds = time.time() - self.begin
+            print("  %s %5d MiB at %6.1f s  %.2f MiB/s" % (self.label, self.next // MIB, seconds, self.next / MIB / seconds), flush=True)
+            self.next += 64 * MIB
+
+    def stopped(self, error):
+        print("%s STOPPED after %d bytes (%.1f MiB) at %.1f s: %s" % (self.label, self.bytes, self.bytes / MIB, time.time() - self.begin, error), flush=True)
+
+
 class Repeat(io.RawIOBase):
     """count bytes made of one block repeated, without holding them all."""
 
-    def __init__(self, block, count):
-        self.block, self.left, self.at = block, count, 0
+    def __init__(self, block, count, meter=None):
+        self.block, self.left, self.at, self.meter = block, count, 0, meter
 
     def readable(self):
         return True
@@ -119,6 +136,8 @@ class Repeat(io.RawIOBase):
         buffer[:n] = self.block[self.at:self.at + n]
         self.at = (self.at + n) % len(self.block)
         self.left -= n
+        if self.meter:
+            self.meter.add(n)
         return n
 
 
@@ -207,17 +226,26 @@ check("the session still works after the aborts", ftp.voidcmd("NOOP").startswith
 # Speed: one large upload and download, for comparison with ~27.5 MiB/s (UE306) before the changes.
 if args.speed_mib:
     block = os.urandom(64 * MIB)
+    meter = Meter("UPLOAD  ")
     begin = time.time()
-    reply = ftp.storbinary("STOR %s/speed.bin" % folder, Repeat(block, args.speed_mib * MIB), blocksize=MIB)
+    try:
+        reply = ftp.storbinary("STOR %s/speed.bin" % folder, Repeat(block, args.speed_mib * MIB, meter), blocksize=MIB)
+    except (ftplib.all_errors, OSError) as error:
+        meter.stopped(error)
+        raise
     seconds = time.time() - begin
     print("UPLOAD   %d MiB in %.1f s: %.2f MiB/s (PC clock); server: %s" % (args.speed_mib, seconds, args.speed_mib / seconds, reply))
     size = ftp.size("%s/speed.bin" % folder)
     check("the timed upload has the right size", size == args.speed_mib * MIB, str(size))
+    meter = Meter("DOWNLOAD")
     begin = time.time()
-    total = [0]
-    reply = ftp.retrbinary("RETR %s/speed.bin" % folder, lambda chunk: total.__setitem__(0, total[0] + len(chunk)), blocksize=MIB)
+    try:
+        reply = ftp.retrbinary("RETR %s/speed.bin" % folder, lambda chunk: meter.add(len(chunk)), blocksize=MIB)
+    except (ftplib.all_errors, OSError) as error:
+        meter.stopped(error)
+        raise
     seconds = time.time() - begin
-    print("DOWNLOAD %d MiB in %.1f s: %.2f MiB/s (PC clock); server: %s" % (total[0] // MIB, seconds, total[0] / MIB / seconds, reply))
+    print("DOWNLOAD %d MiB in %.1f s: %.2f MiB/s (PC clock); server: %s" % (meter.bytes // MIB, seconds, meter.bytes / MIB / seconds, reply))
     ftp.delete("%s/speed.bin" % folder)
 
 for name in names(ftp):

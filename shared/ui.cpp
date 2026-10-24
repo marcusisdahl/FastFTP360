@@ -7,13 +7,13 @@
 #include <stdio.h>
 #include <string.h>
 namespace nb {
-UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),
+UiState::UiState() : phase(0),direction(0),duration(10),armed(0),completed(0),streams(0),rateLimit(0),options(0),downloadLimit(0),diskPhase(0),ftpPhase(0),ftpActive(0),
     tab(0),focus(0),busy(0),keyboard(0),recentCount(0),elapsed(0),rate(0),upload(0),download(0),mebibytes(0),diskTotal(0) {
     strcpy_s(ip,"Waiting for network"); message[0]=0; disk[0]=0; ftp[0]=0;
-    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
+    buffers[0]=0; cpu[0]=0; diskTarget[0]=0; diskBlock[0]=0; drawing[0]=0; speed[0]=0; ftpUser[0]=0; ftpPassword[0]=0;
 }
 // The Network tab has none: its tuning lives on the Settings tab.
-int SettingCount(int tab) { static const int rows[]={1,0,2,3}; return tab>=0 && tab<TabCount ? rows[tab] : 0; }
+int SettingCount(int tab) { static const int rows[]={1,0,2,4}; return tab>=0 && tab<TabCount ? rows[tab] : 0; }
 
 static ImFont* Small; static ImFont* Body; static ImFont* Heading; static ImFont* Hero;
 enum { Left=64, Right=1216, Top=36, Bottom=684 };
@@ -89,11 +89,12 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
         lines[2]="The test file is deleted afterwards.";
     } else if(s.tab==TabSettings) {
         title="Settings";
-        static const char* help[3][3]={
+        static const char* help[4][3]={
             {"Socket buffers for FTP and the network test.","Bigger is not always faster, and the Xbox may","refuse them. Startup default suits most people."},
-            {"The hardware thread for network test streams.","Automatic suits most people.",NULL},
-            {"Paused holds the screen while data moves.","Live drawing during Xbox sends has crashed the","console before. Keep Paused unless testing it."}};
-        for(int i=0;i<3;++i) lines[i]=help[s.focus>=0 && s.focus<3 ? s.focus : 0][i];
+            {"The hardware thread for network test streams","and FTP sessions. USB network work runs on","thread 2. Automatic suits most people."},
+            {"Paused holds the screen while data moves.","Live drawing during Xbox sends has crashed the","console before. Keep Paused unless testing it."},
+            {"Caps FTP uploads and downloads together.","Try 12 or 16 if the console freezes during","fast transfers. Off is fastest."}};
+        for(int i=0;i<3;++i) lines[i]=help[s.focus>=0 && s.focus<4 ? s.focus : 0][i];
     } else if(s.tab==TabFtp) {
         static const char* names[]={"FTP server","FTP server on","Receiving upload","Sending download"};
         title=names[s.ftpPhase>=0 && s.ftpPhase<4 ? s.ftpPhase : 0];
@@ -133,7 +134,7 @@ static void Status(const UiState& s,float x,float y,float w,float h) {
         Rate(x-4,y+50,s.rate);
         // Below the big rate, also on the shorter FTP card.
         float detail=y+h-112; if(detail<y+150) detail=y+150;
-        Text(Body,x,detail,Hex(Muted),(s.options&1) ? "Drawing paused during the transfer. B still stops." : text);
+        Text(Body,x,detail,Hex(Muted),(s.options&1) ? "Screen paused while data moves. The PC shows progress." : text);
     }
     else if(s.message[0] && s.ftpPhase!=1) List->AddText(Body,Body->FontSize,ImVec2(x,y+60),Hex(error ? Error : White),s.message,NULL,w);
     else {
@@ -150,16 +151,17 @@ static void Settings(const UiState& s,float x,float y,float w,float h) {
     const char* heading=s.tab==TabFtp ? "LOGIN" : s.tab==TabSettings ? "ADVANCED" : "SETTINGS";
     char caption[48]; _snprintf_s(caption,sizeof(caption),_TRUNCATE,s.busy ? "%s  (STOP TO CHANGE)" : "%s",heading);
     Text(Small,x+28,y+24,Hex(Muted),caption);
-    const char* labels[3]; const char* values[3]; int rows=SettingCount(s.tab);
+    const char* labels[4]; const char* values[4]; int rows=SettingCount(s.tab);
     if(s.tab==TabDisk) { labels[0]="Drive"; values[0]=s.diskTarget; labels[1]="Block size"; values[1]=s.diskBlock; }
     else if(s.tab==TabFtp) { labels[0]="Login"; values[0]=s.ftpUser[0] ? "On" : "Off, any user name and password"; }
-    else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing; }
-    // Rows close up a little on the shorter FTP card.
-    const float pitch=h<280 ? 60.0f : 70.0f;
+    else { labels[0]="Xbox socket buffers"; values[0]=s.buffers; labels[1]="Worker CPU"; values[1]=s.cpu; labels[2]="Drawing during transfers"; values[2]=s.drawing;
+        labels[3]="FTP speed limit"; values[3]=s.speed; }
+    // Rows close up on the shorter FTP card and when four share the card.
+    const float pitch=rows>3 ? 54.0f : h<280 ? 60.0f : 70.0f;
     for(int i=0;i<rows;++i) {
         float top=y+56+i*pitch; bool focused=!s.busy && i==s.focus;
         if(focused) { Box(x+16,top,w-32,pitch-6,Hex(Raised),10); Box(x+16,top+(pitch-6-44)/2,5,44,Hex(Green),2); }
-        const float tight=pitch<70 ? 3.0f : 0.0f;
+        const float tight=pitch<60 ? 4.0f : pitch<70 ? 3.0f : 0.0f;
         Text(Small,x+36,top+5-tight,Hex(s.busy ? Dim : Muted),labels[i]);
         Text(Body,x+36,top+30-2*tight,Hex(s.busy ? Dim : White),values[i]);
         if(focused) {
@@ -189,7 +191,7 @@ static void Files(float x,float y,float w,float h) {
     Box(x,y,w,h,Hex(Card),14);
     Text(Small,x+28,y+18,Hex(Muted),"FILES NEXT TO THE XEX");
     Text(Body,x+28,y+52,Hex(White),"FastFTP360.ini");
-    Text(Body,x+200,y+52,Hex(Muted),"FTP login");
+    Text(Body,x+200,y+52,Hex(Muted),"Login and settings");
     Text(Body,x+460,y+52,Hex(White),"FastFTP360.log");
     Text(Body,x+640,y+52,Hex(Muted),"FTP activity");
 }
