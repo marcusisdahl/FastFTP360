@@ -266,7 +266,7 @@ void DrawUi(const UiState& s) {
     // Header: name and version, then the address to type into the PC app.
     Box(Left,Top+6,6,40,Hex(Green),3);
     Text(Heading,Left+20,Top,Hex(White),"FastFTP360");
-    Text(Small,Left+20+Width(Heading,"FastFTP360")+16,Top+14,Hex(Muted),"FTP server with network and disk tests  v0.4.1");
+    Text(Small,Left+20+Width(Heading,"FastFTP360")+16,Top+14,Hex(Muted),"FTP server with network and disk tests  v0.5.0");
     bool online=strchr(s.ip,'.')!=NULL;
     TextRight(Heading,Right,Top,Hex(online ? White : Muted),s.ip);
     // The port only matters on the tabs that listen for the PC.

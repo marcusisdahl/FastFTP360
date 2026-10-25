@@ -19,7 +19,7 @@ namespace FastFTP360 {
         readonly List<TestResult> results=new List<TestResult>();
         CancellationTokenSource cancellation; bool running,closeRequested; int testSeconds,activeLimit;
         public MainForm() {
-            Text="FastFTP360 network test v0.4.1"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
+            Text="FastFTP360 network test v0.5.0"; ClientSize=new Size(1050,735); MinimumSize=new Size(1066,774);
             StartPosition=FormStartPosition.CenterScreen; BackColor=navy; ForeColor=ink; Font=new Font("Segoe UI",10);
             AutoScaleMode=AutoScaleMode.Dpi;
             LabelAt("FASTFTP360 NETWORK TEST",26,20,520,40,24,FontStyle.Bold);
