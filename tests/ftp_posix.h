@@ -64,6 +64,7 @@ typedef struct { WORD wVersion; } WSADATA;
 #define FILE_ATTRIBUTE_NORMAL 0x80
 #define FILE_FLAG_SEQUENTIAL_SCAN 0x08000000
 #define FILE_FLAG_NO_BUFFERING 0x20000000
+#define FILE_BEGIN 0
 #define FILE_END 2
 #define INVALID_SET_FILE_POINTER ((DWORD)-1)
 #define NO_ERROR 0
@@ -265,11 +266,18 @@ static inline BOOL WriteFile(HANDLE h,const void* data,DWORD count,DWORD* done,v
 }
 static inline BOOL FlushFileBuffers(HANDLE h) { return fsync(h->fd)==0; }
 static inline DWORD SetFilePointer(HANDLE h,LONG distance,LONG* high,DWORD method) {
-    off_t at=lseek(h->fd,off_t(distance)+(high ? off_t(*high)*4294967296LL : 0),method==FILE_END ? SEEK_END : method==1 ? SEEK_CUR : SEEK_SET);
+    // With high, distance is the unsigned low half, as on Windows.
+    off_t at=lseek(h->fd,high ? off_t(DWORD(distance))+off_t(*high)*4294967296LL : off_t(distance),method==FILE_END ? SEEK_END : method==1 ? SEEK_CUR : SEEK_SET);
     if(at<0) return INVALID_SET_FILE_POINTER;
     errno=0; if(high) *high=LONG(at>>32);
     return DWORD(at);
 }
+static inline DWORD GetFileSize(HANDLE h,DWORD* high) {
+    struct stat st; if(fstat(h->fd,&st)) return DWORD(-1);
+    if(high) *high=DWORD((unsigned long long)st.st_size>>32);
+    return DWORD(st.st_size);
+}
+static inline BOOL SetEndOfFile(HANDLE h) { off_t at=lseek(h->fd,0,SEEK_CUR); return at>=0 && ftruncate(h->fd,at)==0; }
 static inline void* VirtualAlloc(void*,size_t size,DWORD,DWORD) { void* p=NULL; return posix_memalign(&p,4096,size) ? NULL : p; }
 static inline BOOL VirtualFree(void* p,size_t,DWORD) { free(p); return TRUE; }
 static inline DWORD GetFileAttributes(const char* path) {
@@ -289,6 +297,20 @@ static inline BOOL MoveFile(const char* from,const char* to) {
 static inline void nb_filetime(time_t when,FILETIME* out) {
     unsigned long long ticks=(unsigned long long)(when+11644473600LL)*10000000ULL;
     out->dwLowDateTime=DWORD(ticks); out->dwHighDateTime=DWORD(ticks>>32);
+}
+static inline BOOL SystemTimeToFileTime(const SYSTEMTIME* in,FILETIME* out) {
+    if(in->wMonth<1 || in->wMonth>12 || in->wDay<1 || in->wDay>31 || in->wHour>23 || in->wMinute>59 || in->wSecond>59) return FALSE;
+    struct tm t; memset(&t,0,sizeof(t));
+    t.tm_year=in->wYear-1900; t.tm_mon=in->wMonth-1; t.tm_mday=in->wDay; t.tm_hour=in->wHour; t.tm_min=in->wMinute; t.tm_sec=in->wSecond;
+    nb_filetime(timegm(&t),out); return TRUE;
+}
+// Sets the modification time only, the one the server uses.
+static inline BOOL SetFileTime(HANDLE h,const FILETIME*,const FILETIME*,const FILETIME* written) {
+    if(!written) return TRUE;
+    unsigned long long ticks=((unsigned long long)written->dwHighDateTime<<32)|written->dwLowDateTime;
+    struct timespec times[2]; times[0].tv_sec=0; times[0].tv_nsec=UTIME_OMIT;
+    times[1].tv_sec=time_t(ticks/10000000ULL)-11644473600LL; times[1].tv_nsec=0;
+    return futimens(h->fd,times)==0;
 }
 static inline BOOL FileTimeToSystemTime(const FILETIME* in,SYSTEMTIME* out) {
     unsigned long long ticks=((unsigned long long)in->dwHighDateTime<<32)|in->dwLowDateTime;

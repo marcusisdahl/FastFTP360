@@ -119,9 +119,12 @@ Each transfer is logged when it starts and when it ends, so after a crash the lo
 - Uploads, downloads, folder listings, file sizes, new folders, deleting, and renaming.
 - Up to **four** client connections at once. One is usually enough. More connections don't add speed, because the connection itself is the limit.
 - Control port **21**. Passive data ports **36100 to 36199**.
-- **Not supported:** active mode (`PORT`/`EPRT`), FTPS/TLS, SFTP, and resuming a partial transfer. Restart an interrupted upload from the beginning.
+- **Resuming** uploads and downloads (`REST`, `APPE`). If an upload of a new file breaks off, the part that arrived stays on the Xbox, and FileZilla offers to resume it the next time (choose **Resume** when it asks what to do with the existing file).
+- **Checksums on the Xbox** (`HASH` with SHA-1, MD5 or CRC32, and `XSHA1`, `XMD5`, `XCRC`): the Xbox reads the file back from its own drive and sends only the checksum, so an upload can be checked without downloading it. WinSCP can use this (Files > Calculate checksum); `tests/ftp_console.py` does too. A 4 GiB file takes about a minute on the internal drive.
+- **Exact file dates** (`MLSD`, `MLST`, `MDTM`, `MFMT`): listings carry the time to the second, so FileZilla's directory comparison and "overwrite if newer" work, and with *Preserve timestamps of transferred files* turned on, uploads keep the PC's dates.
+- **Not supported:** active mode (`PORT`/`EPRT`), FTPS/TLS and SFTP.
 - Uploading to an existing name replaces the file once the upload has finished. Until then the data goes to a temporary `FastFTP360-<number>.tmp` file in the same folder, so a failed or cancelled upload leaves the old file as it was. Replacing a file needs free space for both copies for a moment.
-- Cancelling in the FTP client stops the transfer straight away, whether the client sends `ABOR` or closes the connection. An unfinished upload is deleted.
+- Cancelling in the FTP client stops the transfer straight away, whether the client sends `ABOR` or closes the connection. A new file's unfinished upload is kept so it can be resumed, and shows as failed in the transfer list and log; an unfinished replacement is deleted and the old file stays.
 - Names of up to 255 characters and paths of up to 259 are accepted; longer ones get an error. The Xbox's own drives (FATX) allow at most 42 characters per name.
 - Data connections are accepted only from the computer that is logged in.
 - Each finished transfer's `226` reply in the FTP client log shows bytes, seconds and MiB/s.

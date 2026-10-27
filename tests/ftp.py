@@ -2,9 +2,10 @@
 
 On Windows, build.ps1 -Tests builds build/host/ftp-host.exe and runs this. On
 Linux or macOS, build the same server first:
-  g++ -std=c++11 -O1 -include tests/ftp_posix.h tests/ftp_host.cpp shared/ftp.cpp shared/bench.cpp -o build/host/ftp-host -lpthread
+  g++ -std=c++11 -O1 -include tests/ftp_posix.h tests/ftp_host.cpp shared/ftp.cpp shared/checksum.cpp shared/bench.cpp -o build/host/ftp-host -lpthread
 """
 import contextlib
+import hashlib
 import ftplib
 import io
 import os
@@ -13,6 +14,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +66,14 @@ def server(folder, sessions=1, credentials=(), speed=0, download_speed=0, disk=0
         if process.poll() is None:
             process.kill()
         process.wait(timeout=5)
+
+
+def error_of(call):
+    try:
+        call()
+        return ""
+    except ftplib.all_errors as error:
+        return str(error)
 
 
 def login(port):
@@ -390,13 +400,13 @@ with tempfile.TemporaryDirectory() as temp:
         data.sendall(os.urandom(MIB // 2))
         raw.hang_up()
         data.close()
-        for _ in range(50):
-            if not (served / "cancelled.bin").exists():
-                break
-            threading.Event().wait(0.1)
-        threading.Event().wait(0.5)
-        check("an upload cancelled by closing the connections is not kept",
-              not (served / "cancelled.bin").exists() and (served / "keep.bin").read_bytes() == replacement and not leftovers(served))
+        threading.Event().wait(1)
+        # A new file cut short stays for resuming (REST or APPE); it is logged as failed.
+        cancelled = served / "cancelled.bin"
+        check("an upload cancelled by closing the connections keeps its part for resuming, and an overwrite keeps the old file",
+              cancelled.exists() and cancelled.stat().st_size <= MIB // 2 and (served / "keep.bin").read_bytes() == replacement
+              and not leftovers(served))
+        cancelled.unlink()
         stream = ftp.transfercmd("RETR /NULL/1024MB.bin")
         stream.recv(65536)
         first = ftp.abort()
@@ -434,6 +444,109 @@ with tempfile.TemporaryDirectory() as temp:
         host.kill()
         output = host.communicate(timeout=10)[0]
         check("the log names the refused address", "Refused a data connection from 127.0.0.2" in output)
+
+    # Resume, checksums and exact dates.
+    for disk in (0, 262144):
+        mode = "uncached" if disk else "cached"
+        with server(served, sessions=0, disk=disk) as (port, host):
+            ftp = login(port)
+            features = ftp.sendcmd("FEAT")
+            check(mode + ": FEAT lists REST STREAM, MDTM, MFMT, MLST and HASH",
+                  all(f in features for f in ("REST STREAM", "MDTM", "MFMT", "MLST type*;size*;modify*;", "HASH CRC32;MD5;SHA-1*", "XCRC")))
+            whole = os.urandom(3 * MIB + 777)
+            # Uploads resumed at a block boundary and in the middle of one (cached then).
+            for cut in (MIB, MIB + 4097):
+                ftp.storbinary("STOR /HDD/resume.bin", io.BytesIO(whole[:cut]))
+                ftp.storbinary("STOR /HDD/resume.bin", io.BytesIO(whole[cut:]), rest=cut)
+                check(mode + ": STOR after REST %d continues the file" % cut, (served / "resume.bin").read_bytes() == whole)
+            ftp.storbinary("STOR /HDD/resume.bin", io.BytesIO(whole[:2 * MIB] + b"junk" * 100))
+            ftp.storbinary("STOR /HDD/resume.bin", io.BytesIO(whole[2 * MIB:]), rest=2 * MIB)
+            check(mode + ": a resumed upload replaces anything past the restart point", (served / "resume.bin").read_bytes() == whole)
+            (served / "resume.bin").write_bytes(whole[:5000])
+            ftp.storbinary("APPE /HDD/resume.bin", io.BytesIO(whole[5000:]))
+            check(mode + ": APPE adds to the end of the file", (served / "resume.bin").read_bytes() == whole)
+            ftp.storbinary("APPE /HDD/fresh.bin", io.BytesIO(b"fresh"))
+            check(mode + ": APPE to a new name creates it", (served / "fresh.bin").read_bytes() == b"fresh")
+            ftp.delete("/HDD/fresh.bin")
+            answered = error_of(lambda: ftp.storbinary("STOR /HDD/resume.bin", io.BytesIO(b"x"), rest=len(whole) + 1))
+            check(mode + ": REST past the end of the file is refused", answered.startswith("551") and (served / "resume.bin").read_bytes() == whole)
+            answered = error_of(lambda: ftp.storbinary("STOR /HDD/missing.bin", io.BytesIO(b"x"), rest=10))
+            check(mode + ": REST on a missing file is refused", answered.startswith("551") and not (served / "missing.bin").exists())
+            for start in (0, 1, 65536, 262144 + 3, len(whole) - 10, len(whole)):
+                got = bytearray()
+                ftp.retrbinary("RETR /HDD/resume.bin", got.extend, rest=start)
+                check(mode + ": RETR after REST %d sends the rest of the file" % start, bytes(got) == whole[start:])
+            answered = error_of(lambda: ftp.retrbinary("RETR /HDD/resume.bin", lambda b: None, rest=len(whole) + 1))
+            check(mode + ": RETR past the end is refused", answered.startswith("551"))
+            got = bytearray()
+            ftp.retrbinary("RETR /NULL/1MB.bin", got.extend, rest=70000)
+            check(mode + ": a resumed NULL download continues the pattern", bytes(got) == pattern(0x46545021, MIB)[70000:])
+            ftp.retrbinary("RETR /HDD/resume.bin", lambda b: None)
+            check(mode + ": REST applies to one transfer only", True)
+            got = bytearray()
+            ftp.retrbinary("RETR /HDD/resume.bin", got.extend)
+            check(mode + ": the next RETR starts at 0 again", bytes(got) == whole)
+
+            # A new upload cut short, then resumed from the size the server reports.
+            raw = Raw(port)
+            raw.command("TYPE I")
+            _, data_port = raw.passive()
+            data = socket.create_connection(("127.0.0.1", data_port), timeout=20)
+            raw.command("STOR /HDD/broken.bin")
+            data.sendall(whole[:2 * MIB + 5])
+            threading.Event().wait(0.5)
+            raw.hang_up()
+            data.close()
+            threading.Event().wait(1)
+            kept = ftp.size("/HDD/broken.bin")
+            ftp.storbinary("STOR /HDD/broken.bin", io.BytesIO(whole[kept:]), rest=kept)
+            check(mode + ": a broken upload resumes from its kept size (%d bytes)" % kept, (served / "broken.bin").read_bytes() == whole)
+            ftp.delete("/HDD/broken.bin")
+
+            for algorithm, expected in (("SHA-1", hashlib.sha1(whole).hexdigest()), ("MD5", hashlib.md5(whole).hexdigest()),
+                                        ("CRC32", "%08x" % zlib.crc32(whole))):
+                check(mode + ": OPTS HASH " + algorithm, ftp.sendcmd("OPTS HASH " + algorithm) == "200 " + algorithm)
+                check(mode + ": HASH gives the " + algorithm + " of the file",
+                      ftp.sendcmd("HASH /HDD/resume.bin") == "213 %s 0-%d %s /HDD/resume.bin" % (algorithm, len(whole), expected))
+            ftp.cwd("/HDD")
+            check(mode + ": XCRC, XMD5 and XSHA1 give the same checksums",
+                  ftp.sendcmd("XCRC /HDD/resume.bin") == "250 %08x" % zlib.crc32(whole)
+                  and ftp.sendcmd('XMD5 "/HDD/resume.bin"') == "250 " + hashlib.md5(whole).hexdigest()
+                  and ftp.sendcmd("XSHA1 resume.bin") == "250 " + hashlib.sha1(whole).hexdigest())
+            check(mode + ": HASH of an empty file", ftp.storbinary("STOR /HDD/empty.bin", io.BytesIO(b"")) and
+                  ftp.sendcmd("XSHA1 /HDD/empty.bin") == "250 " + hashlib.sha1(b"").hexdigest())
+            ftp.delete("/HDD/empty.bin")
+            check(mode + ": HASH of a folder or missing file is refused, and bad algorithms too",
+                  error_of(lambda: ftp.sendcmd("HASH /HDD")).startswith("550") and error_of(lambda: ftp.sendcmd("HASH /HDD/nope")).startswith("550")
+                  and error_of(lambda: ftp.sendcmd("OPTS HASH SHA-512")).startswith("501"))
+
+            check(mode + ": MFMT sets the file's time", ftp.sendcmd("MFMT 20240229123456 /HDD/resume.bin") == "213 Modify=20240229123456; /HDD/resume.bin"
+                  and int((served / "resume.bin").stat().st_mtime) == 1709210096)
+            check(mode + ": MDTM reads it back", ftp.sendcmd("MDTM /HDD/resume.bin") == "213 20240229123456")
+            check(mode + ": MFMT with fractional seconds and a bad time",
+                  ftp.sendcmd("MFMT 20230101000000.123 /HDD/resume.bin").startswith("213 Modify=20230101000000;")
+                  and error_of(lambda: ftp.sendcmd("MFMT 2023 /HDD/resume.bin")).startswith("501")
+                  and error_of(lambda: ftp.sendcmd("MFMT 20231301000000 /HDD/resume.bin")).startswith("501")
+                  and error_of(lambda: ftp.sendcmd("MDTM /HDD")).startswith("550"))
+            ftp.mkd("/HDD/sub")
+            facts = {}
+            for name, entry in ftp.mlsd("/HDD"):
+                facts[name] = entry
+            check(mode + ": MLSD lists files with type, size and modify, and folders as type=dir",
+                  facts.get("resume.bin") == {"type": "file", "size": str(len(whole)), "modify": "20230101000000"}
+                  and facts.get("sub", {}).get("type") == "dir" and "modify" in facts["sub"])
+            top = dict(ftp.mlsd("/"))
+            check(mode + ": MLSD of the top level lists the drive folders", top.get("HDD") == {"type": "dir"} and top.get("NULL") == {"type": "dir"})
+            check(mode + ": MLSD of a file is refused", error_of(lambda: list(ftp.mlsd("/HDD/resume.bin"))).startswith("501"))
+            lines = ftp.sendcmd("MLST /HDD/resume.bin").splitlines()
+            check(mode + ": MLST describes one file on the control connection",
+                  lines[0].startswith("250-") and lines[1] == " type=file;size=%d;modify=20230101000000; /HDD/resume.bin" % len(whole)
+                  and lines[2].startswith("250 "))
+            check(mode + ": MLST of a drive folder and of nothing",
+                  " type=dir; /HDD" in ftp.sendcmd("MLST /HDD") and error_of(lambda: ftp.sendcmd("MLST /HDD/nope")).startswith("550"))
+            ftp.rmd("/HDD/sub")
+            ftp.delete("/HDD/resume.bin")
+            ftp.quit()
 
     def login_file(text):
         path = Path(temp) / "FastFTP360.ini"

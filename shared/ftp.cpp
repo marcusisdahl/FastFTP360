@@ -2,6 +2,7 @@
 // Minimal passive-mode FTP server for throughput tests. The optional login is
 // sent unencrypted, so it must only be armed on a trusted LAN.
 #include "ftp.h"
+#include "checksum.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,9 +108,13 @@ class Session {
     // discarding_: the rest of an over-long command line is being skipped.
     // aborted_: during a transfer the client sent ABOR or closed the control connection.
     bool loggedIn_,discarding_,aborted_;
+    // restart_: where the next RETR or STOR starts (REST). hash_: HASH's algorithm.
+    U64 restart_;
+    Checksum::Kind hash_;
 public:
     Session(Shared& shared,SOCKET control) : shared_(shared),control_(control),passive_(INVALID_SOCKET),inputCount_(0),
-        peerAddress_(0),localAddress_(0),loggedIn_(!shared.user),discarding_(false),aborted_(false) {
+        peerAddress_(0),localAddress_(0),loggedIn_(!shared.user),discarding_(false),aborted_(false),
+        restart_(0),hash_(Checksum::Sha1) {
         strcpy_s(cwd_,"/"); renameFrom_[0]=0; renamePath_[0]=0; user_[0]=0; strcpy_s(peer_,"?");
         sockaddr_in address; int length=sizeof(address);
         if(!getpeername(control,reinterpret_cast<sockaddr*>(&address),&length)) {
@@ -137,10 +142,12 @@ private:
     }
     // The data connection is open: log it and let the observer get ready
     // (the Xbox pauses drawing) before the first byte moves.
-    void Starting(const char* operation,const char* name,const char* path) {
+    void Starting(const char* operation,const char* name,const char* path,U64 offset) {
         const char* kind=operation[0]=='S' ? "Upload" : "Download";
-        if(Limit(operation)) Log("%s %s started, limited to %d MiB/s",kind,path,Limit(operation));
-        else Log("%s %s started",kind,path);
+        char from[48]="";
+        if(offset) _snprintf_s(from,sizeof(from),_TRUNCATE," at byte %I64u",offset);
+        if(Limit(operation)) Log("%s %s started%s, limited to %d MiB/s",kind,path,from,Limit(operation));
+        else Log("%s %s started%s",kind,path,from);
         if(shared_.observer->starting) shared_.observer->starting(shared_.observer->context,operation,name);
     }
     // The speed limit for a STOR or RETR; 0 is none.
@@ -237,9 +244,16 @@ private:
     enum { TopLevel=-1, Invalid=-2, TooLong=-3 };
     int Resolve(const char* argument,char* native,size_t nativeCapacity,char* name,size_t nameCapacity,char* path,size_t pathCapacity);
     bool IsDirectory(int root,const char* native,int depth);
-    void List(const char* argument,bool namesOnly);
+    // How LIST, NLST and MLSD write each entry.
+    enum ListStyle { Long, NamesOnly, Facts };
+    bool Describe(int root,const char* native,int depth,WIN32_FIND_DATA& entry);
+    void List(const char* argument,ListStyle style);
+    void ListOne(const char* argument);
+    void ModifiedTime(const char* argument);
+    void SetModifiedTime(const char* argument);
+    void Hash(const char* verb,const char* argument);
     void Retrieve(const char* argument);
-    void Store(const char* argument);
+    void Store(const char* argument,bool append);
     bool TransferDone(const char* operation,const char* name,const char* path,U64 bytes,double begin,bool ok,const char* failure);
 };
 
@@ -374,8 +388,37 @@ static U64 NullSize(const char* name) {
     return U64(mib)*1048576;
 }
 
-static void FormatEntry(char* line,size_t capacity,const char* name,bool directory,U64 size,const FILETIME* time,bool namesOnly) {
-    if(namesOnly) { _snprintf_s(line,capacity,_TRUNCATE,"%s\r\n",name); return; }
+// An FTP time (MDTM, MFMT, MLSD's modify fact): YYYYMMDDHHMMSS.
+static void FormatTime(const FILETIME& time,char* out,size_t capacity) {
+    SYSTEMTIME st; FileTimeToSystemTime(&time,&st);
+    _snprintf_s(out,capacity,_TRUNCATE,"%04u%02u%02u%02u%02u%02u",st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond);
+}
+// Reads YYYYMMDDHHMMSS, optionally with fractional seconds, and skips the
+// spaces after it. NULL if text does not start with such a time.
+static const char* ParseTime(const char* text,FILETIME& time) {
+    int digits[14];
+    for(int i=0;i<14;++i) { if(text[i]<'0' || text[i]>'9') return NULL; digits[i]=text[i]-'0'; }
+    SYSTEMTIME st={0};
+    st.wYear=WORD(digits[0]*1000+digits[1]*100+digits[2]*10+digits[3]); st.wMonth=WORD(digits[4]*10+digits[5]);
+    st.wDay=WORD(digits[6]*10+digits[7]); st.wHour=WORD(digits[8]*10+digits[9]);
+    st.wMinute=WORD(digits[10]*10+digits[11]); st.wSecond=WORD(digits[12]*10+digits[13]);
+    text+=14;
+    if(*text=='.') { ++text; while(*text>='0' && *text<='9') ++text; }
+    if(*text!=' ' || st.wYear<1980 || !SystemTimeToFileTime(&st,&time)) return NULL;
+    while(*text==' ') ++text;
+    return text;
+}
+
+static void FormatEntry(char* line,size_t capacity,const char* name,bool directory,U64 size,const FILETIME* time,int style) {
+    enum { Long, NamesOnly, Facts }; // Session::ListStyle
+    if(style==NamesOnly) { _snprintf_s(line,capacity,_TRUNCATE,"%s\r\n",name); return; }
+    if(style==Facts) {
+        char modify[32]="";
+        if(time) { strcpy_s(modify,"modify="); FormatTime(*time,modify+7,sizeof(modify)-7); strcat_s(modify,sizeof(modify),";"); }
+        if(directory) _snprintf_s(line,capacity,_TRUNCATE,"type=dir;%s %s\r\n",modify,name);
+        else _snprintf_s(line,capacity,_TRUNCATE,"type=file;size=%I64u;%s %s\r\n",size,modify,name);
+        return;
+    }
     static const char* months[]={"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
     // Same shape as Aurora's listing: everything rwx for root, and 1 Jan 2000
     // where there is no time (the drive folders).
@@ -386,12 +429,23 @@ static void FormatEntry(char* line,size_t capacity,const char* name,bool directo
         directory ? "drwxrwxrwx" : "-rwxrwxrwx",size,months[st.wMonth-1],st.wDay,st.wYear,name);
 }
 
-void Session::List(const char* argument,bool namesOnly) {
-    while(argument[0]=='-') { const char* space=strchr(argument,' '); argument=space ? space+1 : ""; }
+// The directory entry for a file or folder below a drive folder.
+bool Session::Describe(int root,const char* native,int depth,WIN32_FIND_DATA& entry) {
+    if(root<0 || depth<2 || !shared_.roots[root].path) return false;
+    HANDLE find=FindFirstFile(native,&entry);
+    if(find==INVALID_HANDLE_VALUE) return false;
+    FindClose(find);
+    return true;
+}
+
+void Session::List(const char* argument,ListStyle style) {
+    // MLSD has no options; LIST and NLST skip ls-style flags such as -la.
+    while(style!=Facts && argument[0]=='-') { const char* space=strchr(argument,' '); argument=space ? space+1 : ""; }
     char native[600],name[300],path[600];
     int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
     if(root<TopLevel) { Reply("550 No such file or folder."); return; }
     int depth=Depth(path);
+    if(style==Facts && !IsDirectory(root,native,depth)) { Reply("501 Not a folder. Use MLST for a file."); return; }
     if(passive_==INVALID_SOCKET) { Reply("425 Use PASV or EPSV first."); return; }
     // Build the whole listing before opening the data connection.
     size_t capacity=65536,used=0; char* text=static_cast<char*>(malloc(capacity));
@@ -399,14 +453,14 @@ void Session::List(const char* argument,bool namesOnly) {
     char line[700]; bool found=true;
     if(root==-1) {
         for(int i=0;i<shared_.rootCount;++i) {
-            FormatEntry(line,sizeof(line),shared_.roots[i].name,true,0,NULL,namesOnly);
+            FormatEntry(line,sizeof(line),shared_.roots[i].name,true,0,NULL,style);
             size_t n=strlen(line); if(used+n<capacity) { memcpy(text+used,line,n); used+=n; }
         }
     } else if(!shared_.roots[root].path) {
         static const char* samples[]={"64MB.bin","256MB.bin","1024MB.bin"};
         for(int i=0;i<3;++i) {
             if(depth==2 && _stricmp(name,samples[i])) continue;
-            FormatEntry(line,sizeof(line),samples[i],false,NullSize(samples[i]),NULL,namesOnly);
+            FormatEntry(line,sizeof(line),samples[i],false,NullSize(samples[i]),NULL,style);
             size_t n=strlen(line); if(used+n<capacity) { memcpy(text+used,line,n); used+=n; }
         }
         found=depth<=2;
@@ -421,7 +475,7 @@ void Session::List(const char* argument,bool namesOnly) {
             do {
                 if(!strcmp(entry.cFileName,".") || !strcmp(entry.cFileName,"..")) continue;
                 FormatEntry(line,sizeof(line),entry.cFileName,(entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0,
-                    (U64(entry.nFileSizeHigh)<<32)|entry.nFileSizeLow,&entry.ftLastWriteTime,namesOnly);
+                    (U64(entry.nFileSizeHigh)<<32)|entry.nFileSizeLow,&entry.ftLastWriteTime,style);
                 size_t n=strlen(line);
                 if(used+n>=capacity) {
                     char* larger=static_cast<char*>(realloc(text,capacity*2));
@@ -440,6 +494,93 @@ void Session::List(const char* argument,bool namesOnly) {
     bool ok=SendAll(data,text,int(used));
     free(text); CloseData(data);
     Reply(ok ? "226 Listing sent." : "426 Listing interrupted.");
+}
+
+// MLST: one entry's facts on the control connection.
+void Session::ListOne(const char* argument) {
+    char native[600],name[300],path[600],line[700],text[1400];
+    int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
+    const int depth=Depth(path);
+    WIN32_FIND_DATA entry;
+    if(root==TopLevel || (root>=0 && depth==1)) FormatEntry(line,sizeof(line),path,true,0,NULL,Facts);
+    else if(root>=0 && !shared_.roots[root].path && depth==2 && NullSize(name)) FormatEntry(line,sizeof(line),path,false,NullSize(name),NULL,Facts);
+    else if(Describe(root,native,depth,entry))
+        FormatEntry(line,sizeof(line),path,(entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0,
+            (U64(entry.nFileSizeHigh)<<32)|entry.nFileSizeLow,&entry.ftLastWriteTime,Facts);
+    else { Reply("550 No such file or folder."); return; }
+    line[strlen(line)-2]=0; // FormatEntry's CRLF; Reply adds the last one.
+    _snprintf_s(text,sizeof(text),_TRUNCATE,"250-Facts follow\r\n %s\r\n250 End",line);
+    Reply(text);
+}
+
+// MDTM: a file's modification time.
+void Session::ModifiedTime(const char* argument) {
+    char native[600],name[300],path[600],text[64];
+    int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
+    WIN32_FIND_DATA entry;
+    if(!Describe(root,native,Depth(path),entry) || (entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)) { Reply("550 Not a file."); return; }
+    strcpy_s(text,"213 "); FormatTime(entry.ftLastWriteTime,text+4,sizeof(text)-4);
+    Reply(text);
+}
+
+// MFMT <time> <path>: sets a file's modification time, so a client can keep
+// the PC's dates on uploaded files.
+void Session::SetModifiedTime(const char* argument) {
+    FILETIME time; const char* target=ParseTime(argument,time);
+    if(!target || !*target) { Reply("501 Use MFMT YYYYMMDDHHMMSS path."); return; }
+    char native[600],name[300],path[600],text[700];
+    int root=Resolve(target,native,sizeof(native),name,sizeof(name),path,sizeof(path));
+    WIN32_FIND_DATA entry;
+    if(!Describe(root,native,Depth(path),entry) || (entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)) { Reply("550 Not a file."); return; }
+    HANDLE file=CreateFile(native,GENERIC_WRITE,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    bool done=file!=INVALID_HANDLE_VALUE && SetFileTime(file,NULL,NULL,&time);
+    if(file!=INVALID_HANDLE_VALUE) CloseHandle(file);
+    if(!done) { Reply("550 Cannot set the time."); return; }
+    char stamp[16]; FormatTime(time,stamp,sizeof(stamp));
+    _snprintf_s(text,sizeof(text),_TRUNCATE,"213 Modify=%s; %s",stamp,path);
+    Reply(text);
+}
+
+// HASH (draft-bryan-ftp-hash, algorithm from OPTS HASH), XCRC, XMD5 and XSHA1:
+// a checksum of a whole file, read on the Xbox, so an upload can be checked
+// without a download. The reply comes when the file has been read.
+void Session::Hash(const char* verb,const char* argument) {
+    Checksum::Kind kind=hash_;
+    if(!strcmp(verb,"XCRC")) kind=Checksum::Crc32;
+    else if(!strcmp(verb,"XMD5")) kind=Checksum::Md5;
+    else if(!strcmp(verb,"XSHA1")) kind=Checksum::Sha1;
+    // Some clients quote the name, and some X commands may add a start and end.
+    char target[600]; strncpy_s(target,argument[0]=='"' ? argument+1 : argument,_TRUNCATE);
+    if(argument[0]=='"') { char* quote=strrchr(target,'"'); if(quote) *quote=0; }
+    char native[600],name[300],path[600],text[800];
+    int root=Resolve(target,native,sizeof(native),name,sizeof(name),path,sizeof(path));
+    WIN32_FIND_DATA entry;
+    if(!Describe(root,native,Depth(path),entry) || (entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)) { Reply("550 Not a file."); return; }
+    HANDLE file=CreateFile(native,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,
+        FILE_FLAG_SEQUENTIAL_SCAN|(shared_.diskBlock ? FILE_FLAG_NO_BUFFERING : 0),NULL);
+    if(file==INVALID_HANDLE_VALUE) { Reply("550 Cannot open the file."); return; }
+    Checksum sum(kind);
+    const double begin=Now(); U64 bytes=0; bool ok=true; const char* failure="451 Read error on the Xbox drive.";
+    aborted_=false;
+    Pump pump;
+    if(!StartPump(pump,file,false,shared_.diskBlock)) { ok=false; failure="451 Out of memory."; }
+    while(ok) {
+        int i=pump.next;
+        while(WaitForSingleObject(pump.filled[i],100)==WAIT_TIMEOUT) if(Cancelled() || ControlAborted()) { ok=false; failure=AbortedReply; break; }
+        if(!ok) break;
+        if(pump.failed) { ok=false; break; }
+        if(!pump.length[i]) break;
+        sum.Add(pump.buffer[i],pump.length[i]); bytes+=pump.length[i];
+        SetEvent(pump.freed[i]); pump.next^=1;
+    }
+    EndPump(pump); CloseHandle(file);
+    if(!ok) { Log("Checksum of %s FAILED after %I64u bytes",path,bytes); Reply(failure); return; }
+    char digest[41]; sum.Finish(digest);
+    const double seconds=Now()-begin;
+    Log("%s %s %s, %I64u bytes in %.2f s",Checksum::Name(kind),path,digest,bytes,seconds);
+    if(!strcmp(verb,"HASH")) _snprintf_s(text,sizeof(text),_TRUNCATE,"213 %s 0-%I64u %s %s",Checksum::Name(kind),bytes,digest,path);
+    else _snprintf_s(text,sizeof(text),_TRUNCATE,"250 %s",digest);
+    Reply(text);
 }
 
 bool Session::TransferDone(const char* operation,const char* name,const char* path,U64 bytes,double begin,bool ok,const char* failure) {
@@ -462,17 +603,31 @@ void Session::Retrieve(const char* argument) {
     if(passive_==INVALID_SOCKET) { Reply("425 Use PASV or EPSV first."); return; }
     bool null=!shared_.roots[root].path;
     U64 size=null ? NullSize(name) : 0;
+    // A resumed download (REST) starts at offset. Uncached reads must start on
+    // a whole block, so they start before it and skip the first skip bytes.
+    const U64 offset=restart_; DWORD skip=0;
     HANDLE file=INVALID_HANDLE_VALUE;
     if(null && (!size || Depth(path)!=2)) { Reply("550 Use a name like 256MB.bin in this folder."); return; }
     if(!null) {
         file=CreateFile(native,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,
             FILE_FLAG_SEQUENTIAL_SCAN|(shared_.diskBlock ? FILE_FLAG_NO_BUFFERING : 0),NULL);
         if(file==INVALID_HANDLE_VALUE) { Reply("550 Cannot open the file."); return; }
+        DWORD high=0; const DWORD low=GetFileSize(file,&high);
+        size=(U64(high)<<32)|low;
+    }
+    if(offset>size) { if(file!=INVALID_HANDLE_VALUE) CloseHandle(file); Reply("551 The restart point is past the end of the file."); return; }
+    if(offset && !null) {
+        const U64 start=shared_.diskBlock ? offset-offset%U64(shared_.diskBlock) : offset;
+        skip=DWORD(offset-start);
+        LONG high=LONG(start>>32);
+        if(SetFilePointer(file,LONG(DWORD(start)),&high,FILE_BEGIN)==INVALID_SET_FILE_POINTER && GetLastError()!=NO_ERROR) {
+            CloseHandle(file); Reply("551 Cannot start at the restart point."); return;
+        }
     }
     Reply("150 Opening binary data connection.");
     SOCKET data=AcceptData();
     if(data==INVALID_SOCKET) { if(file!=INVALID_HANDLE_VALUE) CloseHandle(file); Reply("425 Data connection was not opened."); return; }
-    Starting("RETR",name,path);
+    Starting("RETR",name,path,offset);
     double begin=Now(),update=begin; U64 bytes=0; bool ok=true; const char* failure="426 Transfer interrupted.";
     aborted_=false;
     if(null) {
@@ -480,9 +635,10 @@ void Session::Retrieve(const char* argument) {
         if(!block) ok=false;
         else {
             Pattern(block,0x46545021);
-            while(ok && bytes<size) {
-                int count=int(size-bytes<U64(Chunk) ? size-bytes : Chunk);
-                ok=SendAll(data,reinterpret_cast<const char*>(block),count,true);
+            for(U64 at=offset;ok && at<size;at+=U64(Chunk)-at%U64(Chunk)) {
+                const int start=int(at%U64(Chunk));
+                int count=int(size-at<U64(Chunk-start) ? size-at : Chunk-start);
+                ok=SendAll(data,reinterpret_cast<const char*>(block)+start,count,true);
                 if(ok) { bytes+=count; ok=Pace("RETR",count); }
                 if(Now()-update>=0.25) { update=Now(); Progress("RETR",name,bytes,update-begin,false,true); }
             }
@@ -498,8 +654,9 @@ void Session::Retrieve(const char* argument) {
             if(pump.failed) { ok=false; failure="451 Read error on the Xbox drive."; break; }
             if(!pump.length[i]) break;
             // Sent a Chunk at a time, so a speed limit spreads the buffer out.
-            const char* piece=reinterpret_cast<const char*>(pump.buffer[i]);
-            for(DWORD left=pump.length[i];ok && left;) {
+            const DWORD skipped=skip<pump.length[i] ? skip : pump.length[i]; skip-=skipped;
+            const char* piece=reinterpret_cast<const char*>(pump.buffer[i])+skipped;
+            for(DWORD left=pump.length[i]-skipped;ok && left;) {
                 const int count=int(left>DWORD(Chunk) ? DWORD(Chunk) : left);
                 ok=SendAll(data,piece,count,true);
                 if(ok) { bytes+=count; piece+=count; left-=count; ok=Pace("RETR",count); }
@@ -540,7 +697,10 @@ static bool ReplaceWithUpload(const char* temporary,const char* native) {
     return true;
 }
 
-void Session::Store(const char* argument) {
+// STOR, or APPE with append. After REST n, or for APPE to an existing file,
+// the upload continues the file at byte n in place; otherwise a new file is
+// written, or a temporary one that replaces the old file at the end.
+void Session::Store(const char* argument,bool append) {
     char native[600],name[300],path[600],temporary[620]="";
     int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
     if(root==TooLong) { Reply("553 The file name or path is too long."); return; }
@@ -548,28 +708,52 @@ void Session::Store(const char* argument) {
     if(passive_==INVALID_SOCKET) { Reply("425 Use PASV or EPSV first."); return; }
     bool null=!shared_.roots[root].path;
     if(null && Depth(path)!=2) { Reply("553 The null folder has no subfolders."); return; }
+    if(null && (append || restart_)) { Reply("553 The null folder cannot resume."); return; }
     HANDLE file=INVALID_HANDLE_VALUE;
+    U64 offset=0; bool resumed=false;
+    // Uncached for this upload; a resumed one goes through the cache when it
+    // starts off a whole block.
+    bool uncached=shared_.diskBlock!=0;
     if(!null) {
         DWORD attributes=GetFileAttributes(native);
         if(attributes!=DWORD(-1) && (attributes&FILE_ATTRIBUTE_DIRECTORY)) { Reply("553 A folder already has that name."); return; }
-        // Replacing a file: receive into a temporary file next to it, so a
-        // failed or cancelled upload leaves the old file as it was.
-        if(attributes!=DWORD(-1)) TemporaryName(native,"tmp",temporary,sizeof(temporary));
-        file=CreateFile(temporary[0] ? temporary : native,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL|(shared_.diskBlock ? FILE_FLAG_NO_BUFFERING : 0),NULL);
-        if(file==INVALID_HANDLE_VALUE) {
-            Reply(strlen(name)>size_t(FatxNameMax) ? "553 Cannot create the file. Xbox drives allow names of up to 42 characters." : "553 Cannot create the file.");
-            return;
+        if(attributes!=DWORD(-1) && (append || restart_)) {
+            WIN32_FIND_DATA entry; HANDLE find=FindFirstFile(native,&entry);
+            if(find==INVALID_HANDLE_VALUE) { Reply("550 Cannot open the file."); return; }
+            FindClose(find);
+            const U64 size=(U64(entry.nFileSizeHigh)<<32)|entry.nFileSizeLow;
+            offset=append ? size : restart_;
+            if(offset>size) { Reply("551 The restart point is past the end of the file."); return; }
+            if(uncached && offset%U64(shared_.diskBlock)) uncached=false;
+            file=CreateFile(native,GENERIC_WRITE,0,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL|(uncached ? FILE_FLAG_NO_BUFFERING : 0),NULL);
+            if(file==INVALID_HANDLE_VALUE) { Reply("550 Cannot open the file."); return; }
+            resumed=true;
+            // Anything past the restart point is replaced by what comes now.
+            LONG high=LONG(offset>>32);
+            if((SetFilePointer(file,LONG(DWORD(offset)),&high,FILE_BEGIN)==INVALID_SET_FILE_POINTER && GetLastError()!=NO_ERROR) || !SetEndOfFile(file)) {
+                CloseHandle(file); Reply("551 Cannot continue the file at the restart point."); return;
+            }
+        } else if(restart_) { Reply("551 There is no file to resume."); return; }
+        else {
+            // Replacing a file: receive into a temporary file next to it, so a
+            // failed or cancelled upload leaves the old file as it was.
+            if(attributes!=DWORD(-1)) TemporaryName(native,"tmp",temporary,sizeof(temporary));
+            file=CreateFile(temporary[0] ? temporary : native,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL|(uncached ? FILE_FLAG_NO_BUFFERING : 0),NULL);
+            if(file==INVALID_HANDLE_VALUE) {
+                Reply(strlen(name)>size_t(FatxNameMax) ? "553 Cannot create the file. Xbox drives allow names of up to 42 characters." : "553 Cannot create the file.");
+                return;
+            }
         }
     }
     const char* written=temporary[0] ? temporary : native;
     Reply("150 Ready to receive.");
     SOCKET data=AcceptData();
     if(data==INVALID_SOCKET) {
-        if(file!=INVALID_HANDLE_VALUE) { CloseHandle(file); DeleteFile(written); }
+        if(file!=INVALID_HANDLE_VALUE) { CloseHandle(file); if(!resumed) DeleteFile(written); }
         Reply("425 Data connection was not opened."); return;
     }
-    Starting("STOR",name,path);
+    Starting("STOR",name,path,offset);
     double begin=Now(),update=begin; U64 bytes=0; bool ok=true; const char* failure="426 Transfer interrupted.";
     aborted_=false;
     if(null) {
@@ -585,8 +769,9 @@ void Session::Store(const char* argument) {
         // of the data is only a finished upload if the client did not abort.
         if(ok && ControlAborted()) ok=false;
     } else {
-        Pump pump; bool eof=false;
-        if(!StartPump(pump,file,true,shared_.diskBlock)) { ok=false; failure="451 Out of memory."; }
+        // diskFailed: the drive, not the connection, ended the upload.
+        Pump pump; bool eof=false,diskFailed=false;
+        if(!StartPump(pump,file,true,uncached ? shared_.diskBlock : 0)) { ok=false; diskFailed=true; failure="451 Out of memory."; }
         while(ok && !eof) {
             int i=pump.next;
             while(WaitForSingleObject(pump.freed[i],100)==WAIT_TIMEOUT) if(Cancelled() || pump.failed) { ok=false; break; }
@@ -610,18 +795,24 @@ void Session::Store(const char* argument) {
             }
         }
         if(ok) WaitForSingleObject(pump.thread,INFINITE);
-        if(pump.failed) { ok=false; failure="452 Write error on the Xbox drive. Is it full?"; }
+        if(pump.failed) { ok=false; diskFailed=true; failure="452 Write error on the Xbox drive. Is it full?"; }
         if(ok && pump.tail>=0 && !AppendCached(file,written,pump.buffer[pump.tail],pump.length[pump.tail])) {
-            ok=false; failure="452 Write error on the Xbox drive. Is it full?";
+            ok=false; diskFailed=true; failure="452 Write error on the Xbox drive. Is it full?";
         }
         EndPump(pump);
-        if(ok && !FlushFileBuffers(file)) { ok=false; failure="452 Write error on the Xbox drive. Is it full?"; }
+        if(ok && !FlushFileBuffers(file)) { ok=false; diskFailed=true; failure="452 Write error on the Xbox drive. Is it full?"; }
         if(file!=INVALID_HANDLE_VALUE) CloseHandle(file);
         // A client that cancels may close the data connection just before it
         // hangs up or sends ABOR; by the time the file is flushed, that is in.
         if(ok && ControlAborted()) ok=false;
         if(ok && temporary[0] && !ReplaceWithUpload(temporary,native)) { ok=false; failure="451 Cannot replace the old file. It was left as it was."; }
-        if(!ok) DeleteFile(written);
+        // A new or resumed file that the connection cut short stays, so the
+        // client can resume it. A temporary file goes: the old file is kept.
+        if(!ok) {
+            const bool keep=!temporary[0] && !diskFailed && (resumed || bytes);
+            if(keep) Log("Kept the unfinished %s for resuming",path);
+            else if(!resumed) DeleteFile(written);
+        }
     }
     CloseData(data);
     if(aborted_) failure=AbortedReply;
@@ -654,7 +845,19 @@ void Session::Run() {
         else if(!loggedIn_ && strcmp(verb,"SYST") && strcmp(verb,"FEAT") && strcmp(verb,"OPTS") && strcmp(verb,"NOOP"))
             Reply("530 Log in with USER and PASS first.");
         else if(!strcmp(verb,"SYST")) Reply("215 UNIX Type: L8");
-        else if(!strcmp(verb,"FEAT")) Reply("211-Features:\r\n SIZE\r\n PASV\r\n EPSV\r\n211 End");
+        else if(!strcmp(verb,"FEAT")) {
+            _snprintf_s(text,sizeof(text),_TRUNCATE,"211-Features:\r\n SIZE\r\n PASV\r\n EPSV\r\n REST STREAM\r\n MDTM\r\n MFMT\r\n"
+                " MLST type*;size*;modify*;\r\n HASH CRC32%s;MD5%s;SHA-1%s\r\n XCRC\r\n XMD5\r\n XSHA1\r\n211 End",
+                hash_==Checksum::Crc32 ? "*" : "",hash_==Checksum::Md5 ? "*" : "",hash_==Checksum::Sha1 ? "*" : "");
+            Reply(text);
+        }
+        else if(!strcmp(verb,"OPTS") && !_strnicmp(argument,"HASH",4) && (!argument[4] || argument[4]==' ')) {
+            const char* choice=argument+4; while(*choice==' ') ++choice;
+            Checksum::Kind kind;
+            if(!*choice) kind=hash_;
+            else if(!Checksum::Parse(choice,kind)) { Reply("501 Unknown algorithm. Use CRC32, MD5 or SHA-1."); continue; }
+            hash_=kind; _snprintf_s(text,sizeof(text),_TRUNCATE,"200 %s",Checksum::Name(kind)); Reply(text);
+        }
         else if(!strcmp(verb,"OPTS") || !strcmp(verb,"CLNT") || !strcmp(verb,"MODE") || !strcmp(verb,"STRU")) Reply("200 OK.");
         else if(!strcmp(verb,"TYPE")) Reply("200 Binary transfers are used for every type.");
         else if(!strcmp(verb,"NOOP")) Reply("200 OK.");
@@ -678,10 +881,21 @@ void Session::Run() {
             Reply(text);
         }
         else if(!strcmp(verb,"PORT") || !strcmp(verb,"EPRT")) Reply("502 Active mode is not supported. Use passive mode.");
-        else if(!strcmp(verb,"LIST") || !strcmp(verb,"NLST")) List(argument,verb[0]=='N');
+        else if(!strcmp(verb,"LIST") || !strcmp(verb,"NLST") || !strcmp(verb,"MLSD")) List(argument,verb[0]=='L' ? Long : verb[0]=='N' ? NamesOnly : Facts);
+        else if(!strcmp(verb,"MLST")) ListOne(argument);
+        else if(!strcmp(verb,"MDTM")) ModifiedTime(argument);
+        else if(!strcmp(verb,"MFMT")) SetModifiedTime(argument);
+        else if(!strcmp(verb,"HASH") || !strcmp(verb,"XCRC") || !strcmp(verb,"XMD5") || !strcmp(verb,"XSHA1")) Hash(verb,argument);
         else if(!strcmp(verb,"RETR")) Retrieve(argument);
-        else if(!strcmp(verb,"STOR")) Store(argument);
-        else if(!strcmp(verb,"REST")) Reply(strcmp(argument,"0") ? "502 Resuming is not supported." : "350 Starting at 0.");
+        else if(!strcmp(verb,"STOR") || !strcmp(verb,"APPE")) Store(argument,verb[0]=='A');
+        else if(!strcmp(verb,"REST")) {
+            U64 offset=0; const char* digit=argument;
+            for(;*digit>='0' && *digit<='9' && offset<(U64(1)<<60);++digit) offset=offset*10+U64(*digit-'0');
+            if(digit==argument || *digit) { Reply("501 Use REST with a byte count."); continue; }
+            restart_=offset;
+            _snprintf_s(text,sizeof(text),_TRUNCATE,"350 Restarting at %I64u.",offset); Reply(text);
+            continue;
+        }
         else if(!strcmp(verb,"SIZE")) {
             int root=Resolve(argument,native,sizeof(native),name,sizeof(name),path,sizeof(path));
             U64 size=0; bool known=false;
@@ -716,6 +930,9 @@ void Session::Run() {
         }
         else if(!strcmp(verb,"ABOR")) Reply("226 Abort complete.");
         else Reply("502 Command not implemented.");
+        // REST applies to the next transfer; clients may set the type or
+        // passive mode in between.
+        if(strcmp(verb,"PASV") && strcmp(verb,"EPSV") && strcmp(verb,"TYPE") && strcmp(verb,"NOOP")) restart_=0;
     }
     Log("Disconnected");
 }
