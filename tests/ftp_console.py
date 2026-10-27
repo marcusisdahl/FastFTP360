@@ -15,6 +15,7 @@ import os
 import socket
 import sys
 import time
+import zlib
 
 MIB = 1048576
 parser = argparse.ArgumentParser()
@@ -43,7 +44,8 @@ def check(name, condition, detail=""):
 
 def login():
     ftp = ftplib.FTP()
-    ftp.connect(args.host, args.port, timeout=60)
+    # Long enough for a checksum of a 4 GiB file read on the Xbox.
+    ftp.connect(args.host, args.port, timeout=180)
     ftp.login(args.user, args.password)
     return ftp
 
@@ -167,6 +169,26 @@ check("STOR with a 300-character name says it is too long", answer.startswith("5
 original = os.urandom(64 * MIB)
 ftp.storbinary("STOR %s/keep.bin" % folder, io.BytesIO(original), blocksize=MIB)
 check("a 64 MiB upload downloads back byte for byte", digest(ftp, folder + "/keep.bin") == hashlib.sha256(original).hexdigest())
+ftp.sendcmd("OPTS HASH SHA-1")
+answer = ftp.sendcmd("HASH %s/keep.bin" % folder)
+check("HASH on the Xbox gives the upload's SHA-1", hashlib.sha1(original).hexdigest() in answer, answer)
+check("XCRC on the Xbox gives the upload's CRC32", ftp.sendcmd("XCRC %s/keep.bin" % folder) == "250 %08x" % zlib.crc32(original))
+
+# Exact dates.
+answer = error_of(lambda: ftp.sendcmd("MFMT 20240229123456 %s/keep.bin" % folder)) or ftp.sendcmd("MDTM %s/keep.bin" % folder)
+check("MFMT sets a time that MDTM reads back", answer == "213 20240229123456", answer)
+facts = dict(ftp.mlsd(folder))
+check("MLSD lists the file with its size and time", facts.get("keep.bin", {}).get("size") == str(len(original))
+      and facts["keep.bin"].get("modify") == "20240229123456", str(facts))
+
+# Resume: a download from the middle, and an upload continued after REST.
+got = bytearray()
+ftp.retrbinary("RETR %s/keep.bin" % folder, got.extend, blocksize=MIB, rest=10 * MIB + 3)
+check("RETR after REST sends the rest of the file", bytes(got) == original[10 * MIB + 3:])
+ftp.storbinary("STOR %s/resume.bin" % folder, io.BytesIO(original[:8 * MIB]), blocksize=MIB)
+ftp.storbinary("STOR %s/resume.bin" % folder, io.BytesIO(original[8 * MIB:]), blocksize=MIB, rest=8 * MIB)
+check("STOR after REST continues the file", ftp.sendcmd("XSHA1 %s/resume.bin" % folder) == "250 " + hashlib.sha1(original).hexdigest())
+ftp.delete("%s/resume.bin" % folder)
 
 # Finding 2 and 3: cancelled overwrites keep the old file.
 def cancelled_overwrite(how):
@@ -202,7 +224,11 @@ raw.command("STOR %s/new.bin" % folder)
 data.sendall(os.urandom(16 * MIB))
 raw.hang_up()
 data.close()
-check("a new upload cancelled by hanging up is deleted", wait_until(lambda: "new.bin" not in names(ftp)), str(names(ftp)))
+time.sleep(2)
+kept = ftp.size("%s/new.bin" % folder) if "new.bin" in names(ftp) else -1
+check("a new upload cut short by hanging up is kept for resuming", 0 <= kept <= 16 * MIB, str(kept))
+if kept >= 0:
+    ftp.delete("%s/new.bin" % folder)
 replacement = os.urandom(32 * MIB + 5)
 ftp.storbinary("STOR %s/keep.bin" % folder, io.BytesIO(replacement), blocksize=MIB)
 check("a finished overwrite replaces the file", digest(ftp, folder + "/keep.bin") == hashlib.sha256(replacement).hexdigest() and
@@ -237,6 +263,15 @@ if args.speed_mib:
     print("UPLOAD   %d MiB in %.1f s: %.2f MiB/s (PC clock); server: %s" % (args.speed_mib, seconds, args.speed_mib / seconds, reply))
     size = ftp.size("%s/speed.bin" % folder)
     check("the timed upload has the right size", size == args.speed_mib * MIB, str(size))
+    expected = hashlib.sha1()
+    for _ in range(args.speed_mib * MIB // len(block)):
+        expected.update(block)
+    expected.update(block[:args.speed_mib * MIB % len(block)])
+    begin = time.time()
+    answer = ftp.sendcmd("XSHA1 %s/speed.bin" % folder)
+    seconds = time.time() - begin
+    print("CHECKSUM %d MiB read on the Xbox in %.1f s: %.2f MiB/s" % (args.speed_mib, seconds, args.speed_mib / seconds))
+    check("the timed upload's SHA-1, read on the Xbox, matches", answer == "250 " + expected.hexdigest(), answer)
     meter = Meter("DOWNLOAD")
     begin = time.time()
     try:
