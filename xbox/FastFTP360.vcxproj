@@ -21,7 +21,13 @@
       <ProgramDatabaseFile>$(OutDir)FastFTP360.pdb</ProgramDatabaseFile><AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalDependencies>xapilib.lib;xboxkrnl.lib;xnet.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xmcore.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <ImageXex><ConfigurationFile>$(ProjectDir)FastFTP360.xml</ConfigurationFile></ImageXex>
+    <ImageXex>
+      <!-- FastFTP360's own Title ID ("FF"), so Aurora can look up its cover art.
+           Without one the XEX has no execution info and Aurora lists it as 00000000,
+           like Aurora itself. The 0x prefix matters: imagexex reads decimal without it. -->
+      <TitleID>0xFFFF4646</TitleID>
+      <ConfigurationFile>$(ProjectDir)FastFTP360.xml</ConfigurationFile>
+    </ImageXex>
     <Deploy><ExcludedFromBuild>true</ExcludedFromBuild></Deploy>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="main.cpp" /><ClCompile Include="..\shared\bench.cpp" /><ClCompile Include="..\shared\ui.cpp" /><ClCompile Include="..\shared\ftp.cpp" /><ClCompile Include="imgui_impl_xbox360.cpp" />
