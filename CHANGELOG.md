@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.5.0
 
 - **Own Title ID, FFFF4646**, so Aurora can find cover art for FastFTP360. Before, the XEX had no Title ID and Aurora listed it as 00000000, the same as Aurora itself, so no cover could ever match it. Aurora keeps an app it has already scanned under the old ID: after updating, remove FastFTP360 from Aurora (or rename its folder) and scan again. Cover, background, banner and icon in Aurora's sizes are in `docs/aurora/`.
 - **Fixed: a long file name or path could crash the app.** A file name of 300 or more characters, or a path of more than about 500, from a logged-in FTP client overflowed a fixed buffer and ended the program. Names over 255 characters and paths over 259 now get a `550`/`553` reply, command lines over 600 characters get `500`, and over-long replies are cut instead of never being sent.

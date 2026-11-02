@@ -17,7 +17,7 @@ FastFTP360 moves files between your PC and the Xbox's internal drive or USB stor
 - **Last 5 transfers** on screen with file name, size and speed. Everything is also written to `FastFTP360.log`.
 - **Network test and disk test** built in, to find out whether the network, the drive or the FTP client is the slow part.
 
-**Best with [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet).** FastFTP360 was made alongside CUsbEnet 1.1, a USB Ethernet driver plugin for the Xbox 360. Together they're the fastest way we know of to copy files to an Xbox 360 over FTP. All the speeds on this page were measured with a TP-Link UE306 adapter on CUsbEnet. FastFTP360 also works over the console's built-in network port.
+**Best with [UsbNet360](https://github.com/marcusisdahl/UsbNet360).** FastFTP360 was made alongside UsbNet360, a USB Ethernet driver plugin for the Xbox 360 (called CUsbEnet up to release 1.1). Together they're the fastest way we know of to copy files to an Xbox 360 over FTP. All the speeds on this page were measured with a TP-Link UE306 adapter on that driver. FastFTP360 also works over the console's built-in network port.
 
 FastFTP360 is experimental homebrew. Read [Safety](#safety) before using it on files you care about.
 
@@ -36,9 +36,9 @@ FastFTP360 is experimental homebrew. Read [Safety](#safety) before using it on f
 
 ## Quick start
 
-You need a console that runs homebrew (XEX) applications, a working network connection, and a PC on the same home network. If you use a USB Ethernet adapter, keep its driver loaded as usual. For the speeds shown here, use [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet) 1.1.
+You need a console that runs homebrew (XEX) applications, a working network connection, and a PC on the same home network. If you use a USB Ethernet adapter, keep its driver loaded as usual. For the speeds shown here, use [UsbNet360](https://github.com/marcusisdahl/UsbNet360) 1.1.1 or later.
 
-1. Download `FastFTP360-<version>.zip` from the [Releases page](https://github.com/marcusisdahl/Xbox360_FastFTP/releases).
+1. Download `FastFTP360-<version>.zip` from the [Releases page](https://github.com/marcusisdahl/FastFTP360/releases).
 2. Copy `FastFTP360.xex` to its own folder on the Xbox, for example `Hdd1:\Apps\FastFTP360\`.
 3. Start it from Aurora, XeXMenu or your usual launcher. **Do not** add it to `launch.ini`: it is an app, not a plugin.
 4. The app opens on the **FTP server** tab. Press **A** to start the server.
@@ -171,7 +171,7 @@ A simple FTP server reads or writes a chunk of the file, then sends or receives 
 
 Network sends go out in 16 KiB pieces with a short yield in between, which keeps the console responsive during long transfers.
 
-Measured on one console with a TP-Link UE306 USB Ethernet adapter and the [CUsbEnet](https://github.com/marcusisdahl/CUsbEnet) 1.1 acksmall driver:
+Measured on one console with a TP-Link UE306 USB Ethernet adapter and the CUsbEnet 1.1 acksmall driver, now [UsbNet360](https://github.com/marcusisdahl/UsbNet360)'s `UsbNet360-acksmall.xex`:
 
 | | PC to Xbox |
 |---|---|
@@ -202,6 +202,8 @@ From PowerShell in the repository:
 ```
 
 This produces `build\xbox\FastFTP360.xex` (the Xbox app) and `build\windows\FastFTP360-PC.exe` (the network test's PC app). The `.exe` next to the XEX is an intermediate PowerPC file, not the PC app. You can also open `FastFTP360.sln` and build **Release | Xbox 360**. The project uses `DEVKIT_ONLY=0` for retail consoles and never deploys to a console automatically.
+
+After a build, `.\store\package.ps1` (needs [7-Zip](https://www.7-zip.org/)) makes the release files in `build\`: `FastFTP360-<version>.zip` with both apps, `FastFTP360-<version>.7z` for the Xbox 360 Homebrew Store (the XEX, [`store\readme.txt`](store/readme.txt) and the license, unpacked into `Apps\FastFTP360\`), and `FastFTP360-<version>.ini`, the store entry for that 7z, made from [`store\consolemods.ini`](store/consolemods.ini).
 
 To build the PC app and run the host tests without the Xbox SDK (needs Python 3):
 
